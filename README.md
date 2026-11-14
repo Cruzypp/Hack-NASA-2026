@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ASTRA Health
 
-## Getting Started
+Sistema personal de gestión de salud preventiva para astronautas — **demo / prototipo**.
+Todos los dispositivos están **simulados**; ninguna frecuencia de protocolo proviene de NASA (ver `docs/EVIDENCE.md`).
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+backend/   FastAPI + SQLite + WebSockets + scikit-learn  (nodo ASTRA a bordo)
+app/       Next.js 16 + Tailwind 4 + shadcn/ui (Radix, Nova) + Recharts  (consola de tripulación)
+docs/      ARCHITECTURE.md · EVIDENCE.md · DEMO.md
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Ejecutar
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# 1. Nodo a bordo (puerto 8000). Crea astra.db y ground.db con datos demo.
+cd backend && uv sync && uv run uvicorn astra.main:app --port 8000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# 2. Consola (puerto 3000)
+bun install && bun dev
+```
 
-## Learn More
+Abrir http://localhost:3000. Cuentas demo (PIN visible en el login): `vega` 1111 (astronauta),
+`okafor` 2222 (CMO), `lindqvist` 3333 (flight surgeon), `ops` 4444 (operador).
 
-To learn more about Next.js, take a look at the following resources:
+Reiniciar datos demo: borrar `backend/astra.db*` y `backend/ground.db*`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Variables: `NEXT_PUBLIC_ASTRA_API` (default `http://localhost:8000`), `ASTRA_DB`, `ASTRA_GROUND_DB`,
+`ASTRA_CORS`, `ASTRA_PLAYBACK_S` (segundos por muestra simulada, default 0.05).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Pruebas
 
-## Deploy on Vercel
+```bash
+cd backend && uv run pytest -q     # motor, reglas, sync, y el flujo MVP de 10 pasos vía HTTP
+bun run lint && bun run build      # frontend
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Guion de demo paso a paso: `docs/DEMO.md`.

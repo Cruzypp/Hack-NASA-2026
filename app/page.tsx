@@ -1,69 +1,106 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { ArrowRight, Satellite, ShieldCheck, Stethoscope, UserRound, Wrench } from "lucide-react";
+import { api, session, type User } from "@/lib/api";
+import { ErrorAlert, SimulatedNote } from "@/components/astra";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+
+// Demo accounts only. PINs are shown because this is a simulation environment.
+const DEMO = [
+  { username: "vega", pin: "1111", label: "M. Vega", role: "Astronaut · CM-01", icon: UserRound },
+  { username: "okafor", pin: "2222", label: "Dr. K. Okafor", role: "Crew Medical Officer · CM-02", icon: Stethoscope },
+  { username: "lindqvist", pin: "3333", label: "Dr. S. Lindqvist", role: "Flight Surgeon · ground", icon: ShieldCheck },
+  { username: "ops", pin: "4444", label: "Mission Ops", role: "Mission Operator", icon: Wrench },
+];
+
+export default function Login() {
+  const router = useRouter();
+  const [username, setUsername] = useState("vega");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ token: string; user: User }>("/auth/login", { body: { username, pin } });
+      session.set(r.token);
+      router.push("/dashboard");
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="relative grid min-h-screen lg:grid-cols-2">
+      <section className="relative hidden flex-col justify-between overflow-hidden border-r p-10 lg:flex">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="absolute -right-40 -top-40 size-[560px] rounded-full border border-primary/15" />
+          <div className="absolute -right-20 -top-20 size-[400px] rounded-full border border-primary/10" />
+          <div className="absolute right-24 top-24 size-[240px] rounded-full bg-primary/10 blur-3xl" />
+        </div>
+        <div className="relative flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Satellite className="size-5" /></div>
+          <span className="font-mono text-sm font-semibold tracking-[0.3em] text-primary">ASTRA HEALTH</span>
+        </div>
+        <div className="relative max-w-md">
+          <h1 className="text-4xl font-semibold leading-tight tracking-tight">Preventive health, tracked across the whole mission.</h1>
+          <p className="mt-4 text-muted-foreground">
+            Follows each crew member&apos;s approved protocol, compares data against their own baseline, and keeps working through loss of signal.
           </p>
+          <dl className="mt-8 grid grid-cols-3 gap-4 font-mono text-xs">
+            {[["Protocols", "versioned"], ["Anomalies", "explainable"], ["Sync", "store & forward"]].map(([k, v]) => (
+              <div key={k} className="rounded-lg border bg-card/50 p-3"><dt className="text-muted-foreground">{k}</dt><dd className="mt-1 text-foreground">{v}</dd></div>
+            ))}
+          </dl>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        <p className="relative font-mono text-xs text-muted-foreground">Demo onboard node · not a certified medical device</p>
+      </section>
+
+      <section className="flex items-center justify-center p-4 md:p-10">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="text-xl">Sign in</CardTitle>
+            <CardDescription>Select a crew or staff account.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submit} className="flex flex-col gap-5">
+              <fieldset className="grid gap-2" aria-label="Account">
+                {DEMO.map((d) => (
+                  <label key={d.username}
+                    className={cn("flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40 has-focus-visible:ring-2 has-focus-visible:ring-ring",
+                      username === d.username && "border-primary bg-primary/5")}>
+                    <input type="radio" name="user" className="sr-only" checked={username === d.username} onChange={() => { setUsername(d.username); setPin(""); }} />
+                    <d.icon className={cn("size-4", username === d.username ? "text-primary" : "text-muted-foreground")} aria-hidden />
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium">{d.label}</span>
+                      <span className="block text-xs text-muted-foreground">{d.role}</span>
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground">PIN {d.pin}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <div className="grid gap-2">
+                <Label htmlFor="pin">PIN</Label>
+                <Input id="pin" type="password" inputMode="numeric" autoComplete="current-password" className="font-mono tracking-[0.4em]"
+                  value={pin} onChange={(e) => setPin(e.target.value)} required minLength={4} />
+              </div>
+              <ErrorAlert error={error} title="Sign-in failed" />
+              <Button size="lg" disabled={busy}>{busy ? "Signing in…" : <>Sign in <ArrowRight /></>}</Button>
+              <SimulatedNote>All sensors and the ground link are simulated. Protocol frequencies are demo placeholders.</SimulatedNote>
+            </form>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
   );
 }
