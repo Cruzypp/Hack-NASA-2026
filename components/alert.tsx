@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { BrainCircuit, CircleCheck, Cpu, HeartPulse, Lightbulb } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -55,6 +56,18 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {e.summary && <p className="text-sm">{e.summary}</p>}
+        {!!e.findings?.length && (
+          <ul className="flex flex-col gap-1.5">
+            {e.findings.map((f) => (
+              <li key={f.code} className="rounded-md border px-3 py-2 text-xs">
+                <span className="flex flex-wrap items-center gap-2"><StatusBadge value={f.level} tone={f.level === "ACTION" ? "danger" : f.level === "REVIEW" ? "warn" : "info"} /><span className="font-medium">{f.title}</span></span>
+                <span className="mt-1 block font-mono text-muted-foreground">{f.observation}</span>
+                {isMedical(user.role) && <span className="mt-0.5 block">{f.action} · <span className="text-muted-foreground">{f.responsible}</span></span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {alert.type === "BODY_COMPOSITION_FINDINGS" && <Button size="sm" variant="outline" className="self-start" asChild><Link href="/body">Open body composition</Link></Button>}
         {e.baseline && obs && e.z !== undefined && (
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[["Observed", `${obs.value} ${obs.unit}`], ["Baseline", `${e.baseline.median} ± ${e.baseline.robust_sd}`], ["Robust z", e.z > 0 ? `+${e.z}` : e.z], ["Points", e.baseline.n]].map(([k, v]) => (

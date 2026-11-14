@@ -228,7 +228,8 @@ def radiation_summary(conn, crew_member_id: str, at: datetime, days: int = 7) ->
         "personal": {"latest": personal[-1] if personal else None, "mean_rate_uGy_h": mean(personal),
                      "window_dose_uGy": round(cum[-1]["cumulative_uGy"] - cum[0]["cumulative_uGy"], 1) if len(cum) > 1 else None,
                      "series": [{"value": r["dose_rate_uGy_h"], "measured_at": r["measured_at"]} for r in personal]},
-        "area": {"latest": area[-1] if area else None, "mean_rate_uGy_h": mean(area)},
+        "area": {"latest": area[-1] if area else None, "mean_rate_uGy_h": mean(area),
+                 "series": [{"value": r["dose_rate_uGy_h"], "measured_at": r["measured_at"]} for r in area]},
         "readings": list(reversed(personal))[:200], "area_readings": list(reversed(area))[:50],
         "eva": evas, "limits": LIMITS_NOTE,
     }

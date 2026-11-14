@@ -21,7 +21,7 @@ import { ExerciseSessionList, type ExerciseSession } from "@/components/exercise
 type Sample = { offset_s: number; value: number | null; quality: string };
 type Summary = { valid_minutes: number; valid_fraction: number; duration_minutes: number; hr_mean: number | null; hr_peak: number | null };
 type Finished = { session: { id: string; status: string; summary: Summary }; completion?: { accepted: boolean; reasons: string[]; manual_allowed: boolean } };
-type ExSummary = { compliance: { status: string; n: number }[]; sessions: number; hr_mean_history: number[]; rpe: { value: number }[];
+type ExSummary = { compliance: { status: string; n: number }[]; sessions: number; hr_mean_history: { value: number; measured_at: string }[]; rpe: { value: number; measured_at: string }[];
   sleep: { unit: string; points: { value: number; measured_at: string }[]; baseline: { sufficient: boolean; median?: number; robust_sd?: number } }; note: string };
 
 const UNSCHEDULED = "__none";
@@ -156,6 +156,23 @@ function Exercise() {
             <CardDescription>Band shows personal baseline ± 2 robust SD.</CardDescription>
           </CardHeader>
           <CardContent>{summary.data ? <TrendChart points={summary.data.sleep.points} baseline={summary.data.sleep.baseline} unit="h" label="sleep" /> : <EmptyState>Loading…</EmptyState>}</CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><HeartPulse className="size-4 text-primary" />Mean session heart rate</CardTitle>
+            <CardDescription>{summary.data?.hr_mean_history.length ?? 0} completed telemetry sessions.</CardDescription>
+          </CardHeader>
+          <CardContent>{summary.data ? <TrendChart points={summary.data.hr_mean_history} baseline={{ sufficient: false }} unit="bpm" label="session hr" /> : <EmptyState>Loading…</EmptyState>}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Activity className="size-4 text-primary" />Perceived exertion</CardTitle>
+            <CardDescription>Borg 6–20, last {summary.data?.rpe.length ?? 0} entries. {summary.data?.note}</CardDescription>
+          </CardHeader>
+          <CardContent>{summary.data ? <TrendChart points={[...summary.data.rpe].reverse()} baseline={{ sufficient: false }} unit="Borg" label="rpe" /> : <EmptyState>Loading…</EmptyState>}</CardContent>
         </Card>
       </div>
     </>

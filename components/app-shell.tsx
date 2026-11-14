@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Activity, BellRing, CalendarClock, ChevronsUpDown, Dumbbell, FileHeart, HeartPulse, LayoutDashboard, LogOut, Orbit, RadioTower, Satellite, Stethoscope } from "lucide-react";
+import { Activity, BellRing, CalendarClock, ChevronsUpDown, Dumbbell, PersonStanding, FileHeart, HeartPulse, LayoutDashboard, LogOut, Orbit, RadioTower, Satellite, Stethoscope } from "lucide-react";
 import { api, isMedical, session, type User } from "@/lib/api";
-import { SessionProvider, useSession } from "@/lib/session";
+import { SessionProvider, useData, useSession } from "@/lib/session";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -26,6 +26,7 @@ const NAV = [
     { href: "/schedule", label: "Schedule", icon: CalendarClock, ops: true },
     { href: "/measurements", label: "Measurements", icon: HeartPulse },
     { href: "/exercise", label: "Exercise & Recovery", icon: Dumbbell },
+    { href: "/body", label: "Body Composition", icon: PersonStanding },
   ] },
   { group: "Clinical", items: [
     { href: "/crew", label: "Crew Health", icon: Stethoscope, medical: true },
@@ -141,6 +142,7 @@ function AppSidebar() {
 
 function TopBar() {
   const { user, sync, nodeOnline, crew, setCrew } = useSession();
+  const roster = useData<{ crew_member_id: string; display_name: string }[]>(isMedical(user.role) ? "/crew" : null);
   const [busy, setBusy] = useState(false);
   const aos = sync?.link === "AOS";
 
@@ -184,8 +186,9 @@ function TopBar() {
         <Select value={crew} onValueChange={setCrew}>
           <SelectTrigger size="sm" className="w-36 font-mono text-xs" aria-label="Crew member in view"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="CM-01">CM-01 · Vega</SelectItem>
-            <SelectItem value="CM-02">CM-02 · Okafor</SelectItem>
+            {(roster.data ?? [{ crew_member_id: crew, display_name: "" }]).map((c) => (
+              <SelectItem key={c.crew_member_id} value={c.crew_member_id}>{c.crew_member_id}{c.display_name && ` · ${c.display_name.replace(/^Dr\.\s*/, "").split(/\s+/).at(-1)}`}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}

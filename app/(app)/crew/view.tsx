@@ -1,9 +1,10 @@
 "use client";
 
-import { Activity, BookText, ClipboardList, ScanSearch } from "lucide-react";
+import { Activity, BookText, ClipboardList, PersonStanding, ScanSearch } from "lucide-react";
 import { isMedical } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/astra";
+import { BodyCompositionPanel } from "@/components/body/body-composition";
 import { CarePlan } from "@/components/crew/care-plan";
 import { Logbook } from "@/components/crew/logbook";
 import { Reviews } from "@/components/crew/reviews";
@@ -20,11 +21,13 @@ export function View() {
       <Tabs defaultValue="status">
         <TabsList>
           <TabsTrigger value="status"><Activity />Status</TabsTrigger>
+          <TabsTrigger value="body"><PersonStanding />Body composition</TabsTrigger>
           <TabsTrigger value="plan"><ClipboardList />Care plan</TabsTrigger>
           <TabsTrigger value="reviews"><ScanSearch />Reviews</TabsTrigger>
           <TabsTrigger value="logbook"><BookText />Logbook</TabsTrigger>
         </TabsList>
         <TabsContent value="status" className="mt-4"><StatusPanel crew={crew} /></TabsContent>
+        <TabsContent value="body" className="mt-4"><BodyCompositionPanel crew={crew} /></TabsContent>
         <TabsContent value="plan" className="mt-4"><CarePlan crew={crew} /></TabsContent>
         <TabsContent value="reviews" className="mt-4"><Reviews crew={crew} /></TabsContent>
         <TabsContent value="logbook" className="mt-4"><Logbook crew={crew} /></TabsContent>

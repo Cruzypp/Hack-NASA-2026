@@ -10,36 +10,43 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 type Point = { time: string; value: number };
 type HistoricalPoint = { measured_at: string; value: number };
 
-export function LiveTelemetry({ initialPersonal, initialSleep = [] }: { initialPersonal: HistoricalPoint[]; initialSleep?: HistoricalPoint[] }) {
+/** Seeded from stored history; mount with `key={crew}` so switching crew member starts fresh. */
+export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initialSleep = [] }: {
+  crew: string; initialPersonal: HistoricalPoint[]; initialArea?: HistoricalPoint[]; initialSleep?: HistoricalPoint[];
+}) {
   const { subscribe } = useSession();
   const [heartRate, setHeartRate] = useState<Point[]>([]);
   const [personal, setPersonal] = useState<Point[]>(initialPersonal.slice(-24).map((point) => ({
     time: point.measured_at.slice(11, 16), value: point.value,
   })));
-  const [area, setArea] = useState<Point[]>([]);
+  const [area, setArea] = useState<Point[]>(initialArea.slice(-24).map((point) => ({
+    time: point.measured_at.slice(11, 16), value: point.value,
+  })));
   const [sleep, setSleep] = useState<Point[]>(initialSleep.slice(-24).map((point) => ({
     time: point.measured_at.slice(5, 10), value: point.value,
   })));
 
   useEffect(() => subscribe((event) => {
+    if (event.crew_member_id && event.crew_member_id !== crew && event.type !== "radiation") return;
     if (event.type === "sample" && typeof event.value === "number") {
       setHeartRate((points) => [...points, { time: `${Number(event.offset_s ?? 0) / 60}′`, value: event.value as number }].slice(-36));
     }
     if (event.type === "radiation") {
-      const reading = event.reading as { scope?: string; dose_rate_uGy_h?: number; measured_at?: string };
+      const reading = event.reading as { scope?: string; crew_member_id?: string | null; dose_rate_uGy_h?: number; measured_at?: string };
       if (typeof reading?.dose_rate_uGy_h !== "number") return;
+      if (reading.scope === "PERSONAL" && reading.crew_member_id !== crew) return;
       const point = { time: reading.measured_at?.slice(11, 16) ?? "now", value: reading.dose_rate_uGy_h };
       if (reading.scope === "PERSONAL") setPersonal((points) => [...points, point].slice(-36));
       if (reading.scope === "AREA") setArea((points) => [...points, point].slice(-36));
     }
     if (event.type === "simulation" && event.kind === "sleep") {
-      const measurement = event.measurement as { value?: number; measured_at?: string };
-      if (typeof measurement?.value === "number") {
+      const measurement = event.measurement as { value?: number; measured_at?: string; crew_member_id?: string };
+      if (typeof measurement?.value === "number" && measurement.crew_member_id === crew) {
         const value = measurement.value;
         setSleep((points) => [...points, { time: measurement.measured_at?.slice(5, 10) ?? "today", value }].slice(-36));
       }
     }
-  }), [subscribe]);
+  }), [subscribe, crew]);
 
   return (
     <Card>
@@ -51,7 +58,7 @@ export function LiveTelemetry({ initialPersonal, initialSleep = [] }: { initialP
         <TelemetryChart icon={Activity} title="Heart rate" unit="bpm" color="var(--primary)" points={heartRate} empty="Start an exercise simulation to stream HR." />
         <TelemetryChart icon={Activity} title="Sleep duration" unit="h" color="var(--chart-3)" points={sleep} empty="Run a sleep simulation to add a sleep result." />
         <TelemetryChart icon={Radiation} title="Personal dose rate" unit="µGy/h" color="var(--warning)" points={personal} empty="No personal radiation stream yet." />
-        <TelemetryChart icon={Radiation} title="Area dose rate" unit="µGy/h" color="var(--chart-4)" points={area} empty="Run an area radiation simulation to stream it." />
+        <TelemetryChart icon={Radiation} title="Area dose rate" unit="µGy/h" color="var(--chart-4)" points={area} empty="No area monitor readings yet." />
       </CardContent>
     </Card>
   );

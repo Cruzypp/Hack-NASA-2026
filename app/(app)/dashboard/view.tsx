@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { BellRing, CalendarCheck, CloudUpload, Cpu, Moon, HeartPulse, Radiation, X } from "lucide-react";
+import { BellRing, CalendarCheck, CloudUpload, Cpu, Moon, HeartPulse, Radiation, Scale, X } from "lucide-react";
+import { metricLabel } from "@/lib/labels";
 import { toast } from "sonner";
 import { api, fmtDate, fmtTime, type Alert, type Measurement, type RadiationBrief, type SyncState, type Task } from "@/lib/api";
 import { useData, useSession } from "@/lib/session";
@@ -11,6 +12,7 @@ import { DeviceList, MeasurementTable, type Device } from "@/components/tables";
 import { ScheduleDayList } from "@/components/schedule/schedule-day-list";
 import { SimulationLab } from "@/components/dashboard/simulation-lab";
 import { LiveTelemetry } from "@/components/dashboard/live-telemetry";
+import { BodyCompositionBrief } from "@/components/body/body-composition";
 import { Alert as UiAlert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -91,7 +93,8 @@ function Health({ d }: { d: Dash }) {
       )}
 
       <SimulationLab />
-      <LiveTelemetry initialPersonal={d.radiation?.personal.series ?? []} initialSleep={d.trends?.sleep_hours?.points ?? []} />
+      <LiveTelemetry key={d.crewMemberId} crew={d.crewMemberId!} initialPersonal={d.radiation?.personal.series ?? []}
+        initialArea={d.radiation?.area.series ?? []} initialSleep={d.trends?.sleep_hours?.points ?? []} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -120,6 +123,7 @@ function Health({ d }: { d: Dash }) {
               {d.alerts.length ? d.alerts.slice(0, 4).map((a) => <AlertCard key={a.id} alert={a} compact />) : <EmptyState icon={BellRing}>No open alerts</EmptyState>}
             </CardContent>
           </Card>
+          {d.crewMemberId && <BodyCompositionBrief crew={d.crewMemberId} />}
           <Card>
             <CardHeader><CardTitle>Sensors</CardTitle></CardHeader>
             <CardContent><DeviceList devices={d.devices.filter((x) => x.integration === "SIMULATED")} /></CardContent>
@@ -127,14 +131,14 @@ function Health({ d }: { d: Dash }) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         {d.trends && Object.entries(d.trends).map(([metric, t]) => {
-          const Icon = metric === "sleep_hours" ? Moon : HeartPulse;
+          const Icon = metric === "sleep_hours" ? Moon : metric === "body_mass" ? Scale : HeartPulse;
           const latest = t.points.at(-1)?.value;
           return (
             <Card key={metric}>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Icon className="size-4 text-primary" />{metric === "sleep_hours" ? "Sleep duration" : "Resting heart rate"}</CardTitle>
+                <CardTitle className="flex items-center gap-2"><Icon className="size-4 text-primary" />{metricLabel(metric)}</CardTitle>
                 <CardDescription className="font-mono text-xs">
                   {t.baseline.sufficient ? `baseline ${t.baseline.median} ± ${t.baseline.robust_sd} ${t.unit} · n=${t.baseline.n}` : `baseline insufficient · n=${t.baseline.n}`}
                 </CardDescription>

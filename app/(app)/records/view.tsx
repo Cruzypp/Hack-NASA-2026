@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BellRing, CircleCheck, Download, Dumbbell, HeartPulse, Radiation, type LucideIcon } from "lucide-react";
+import { BellRing, BookText, CircleCheck, Download, Dumbbell, HeartPulse, PersonStanding, Radiation, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, fmtDate } from "@/lib/api";
 import { useData, useSession } from "@/lib/session";
@@ -20,6 +20,8 @@ const KIND: Record<string, { icon: LucideIcon; label: string; color: string }> =
   alert: { icon: BellRing, label: "Alerts", color: "text-warning-strong border-warning/30 bg-warning/10" },
   task: { icon: CircleCheck, label: "Tasks", color: "text-success border-success/30 bg-success/10" },
   radiation: { icon: Radiation, label: "Radiation", color: "text-warning-strong border-warning/30 bg-warning/10" },
+  log: { icon: BookText, label: "Logbook", color: "text-muted-foreground border-border bg-muted/40" },
+  body: { icon: PersonStanding, label: "Body composition", color: "text-chart-3 border-chart-3/30 bg-chart-3/10" },
 };
 
 function describe(i: Item): { title: string; meta?: string; badge?: string } {
@@ -33,6 +35,12 @@ function describe(i: Item): { title: string; meta?: string; badge?: string } {
     case "alert": return { title: d.title, meta: `${humanize(d.category)} · ${humanize(d.type)}`, badge: d.status };
     case "task": return { title: d.title, meta: `${humanize(d.schedule_type)} · evidence ${(d.evidenceIds as string[] | undefined)?.length ?? 0}`, badge: "COMPLETED" };
     case "radiation": return { title: `Dosimeter · ${d.dose_rate_uGy_h} µGy/h`, meta: `cumulative ${d.cumulative_uGy} µGy${d.eva_id ? ` · ${d.eva_id}` : ""}` };
+    case "log": return { title: String(d.body), meta: `${humanize(d.category)} · ${d.author_name}${d.amends_id ? " · addendum" : ""}`, badge: d.shared_with_crew ? "SHARED" : undefined };
+    case "body": {
+      const v = d.values as { body_mass_kg: number; lean_mass_kg: number };
+      const e = d.evaluation as { status: string; summary: string };
+      return { title: `Body composition (${d.method}, ${humanize(d.phase).toLowerCase()}) · FFM ${v.lean_mass_kg} kg · mass ${v.body_mass_kg} kg`, meta: e.summary, badge: e.status };
+    }
     default: return { title: i.kind };
   }
 }

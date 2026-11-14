@@ -6,6 +6,7 @@ import { fmtDate, type LogEntry, type Measurement, type RadiationBrief, type Rev
 import { useData } from "@/lib/session";
 import { humanize } from "@/lib/labels";
 import { EmptyState, ErrorAlert, PageSkeleton, StatusBadge, TaskIcon } from "@/components/astra";
+import { BodyCompositionBrief } from "@/components/body/body-composition";
 import { RunReview } from "@/components/crew/reviews";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -148,7 +149,9 @@ export function StatusPanel({ crew }: { crew: string }) {
         </Card>
       </div>
 
-      <Card>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <BodyCompositionBrief crew={crew} />
+        <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><BookText className="size-4 text-primary" />Recent logbook entries</CardTitle>
         </CardHeader>
@@ -166,6 +169,7 @@ export function StatusPanel({ crew }: { crew: string }) {
           ) : <EmptyState icon={BookText}>No entries yet</EmptyState>}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

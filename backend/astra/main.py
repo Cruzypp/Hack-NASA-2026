@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import clinical, db, devices, intelligence, protocols, seed, sync
+from . import body as bodycomp, clinical, db, devices, intelligence, protocols, seed, sync
 from .db import Actor, SYSTEM, iso, parse
 
 MEDICAL_ROLES = {"CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"}
@@ -58,11 +58,18 @@ class SessionIn(BaseModel):
 
 class SleepDemoIn(BaseModel):
     scenario: Literal["BAD", "REGULAR", "GOOD", "ANOMALOUS"]
+    crew_member_id: str | None = None
 
 
 class RadiationDemoIn(BaseModel):
     scenario: Literal["NORMAL", "ELEVATED", "ANOMALOUS"]
     scope: Literal["PERSONAL", "AREA"] = "PERSONAL"
+    crew_member_id: str | None = None
+
+
+class BodyDemoIn(BaseModel):
+    scenario: Literal["STABLE", "MILD_LOSS", "LEG_ATROPHY", "ASYMMETRIC", "GLOBAL_LOSS", "FLUID_SHIFT", "RECOVERY", "RANDOM"]
+    phase: Literal["INFLIGHT", "POSTFLIGHT"] = "INFLIGHT"
     crew_member_id: str | None = None
 
 
@@ -191,6 +198,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
     conn = db.connect(db_path)
     ground = sync.connect_ground(ground_path)
     seed.seed(conn, ground)
+    bodycomp.seed(conn)
     hub = Hub()
     running: dict[str, asyncio.Task] = {}
 
@@ -209,7 +217,9 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         today = datetime.combine(at.date(), time(0), tzinfo=at.tzinfo)
         for c in crew_ids():
             protocols.generate_tasks(conn, c, today, today + timedelta(days=protocols.PLAN_HORIZON_DAYS))
-        devices.sample_dosimetry(conn, crew_ids(), at)
+        if devices.sample_dosimetry(conn, crew_ids(), at):
+            for r in db.rows(conn, "SELECT * FROM radiation_readings WHERE measured_at = ? AND device_id IN ('cad-sim','rem-sim')", iso(at)):
+                await hub.send({"type": "radiation", "reading": r}, r["crew_member_id"], medical=r["scope"] == "PERSONAL")
         auto = clinical.run_due(conn, at)  # before tick, so automated tasks never show as overdue
         if any(auto.values()):
             await hub.send({"type": "tasks", **auto})
@@ -305,7 +315,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                 "recent": db.rows(conn, "SELECT * FROM measurements WHERE crew_member_id = ? AND superseded = 0 "
                                         "ORDER BY measured_at DESC LIMIT 8", crew),
                 "alerts": [a for a in _alerts(actor, status="OPEN") if a["crew_member_id"] in (crew, None)],
-                "trends": {m: intelligence.trends(conn, crew, m, at) for m in ("resting_hr", "sleep_hours")},
+                "trends": {m: intelligence.trends(conn, crew, m, at) for m in ("resting_hr", "sleep_hours", "body_mass")},
                 "missingData": {m: intelligence.missing_days(conn, crew, m, 7, at) for m in ("resting_hr", "sleep_hours")},
                 "radiation": _radiation_brief(crew, at),
                 "compliance": _compliance(crew, at)}
@@ -481,20 +491,22 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
     @app.post("/demo/sleep")
     async def demo_sleep(body: SleepDemoIn, actor: Actor = Depends(current)):
         need(actor, "ASTRONAUT", *MEDICAL_ROLES)
-        if not actor.crew_member_id:
+        crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
+        if not crew:
             raise HTTPException(400, "Sleep simulations require a crew member")
+        _crew_or_404(crew)
         values = {"BAD": 5.0, "REGULAR": 7.0, "GOOD": 8.5, "ANOMALOUS": 3.0}
         at = db.now()
-        m = _store_measurement(actor, actor.crew_member_id, "sleep_hours", values[body.scenario], at, "STREAM",
+        m = _store_measurement(actor, crew, "sleep_hours", values[body.scenario], at, "STREAM",
                                f"Sleep simulator scenario: {body.scenario.lower()}", device_id="sleep-sim")
         result = await _after_measurement(actor, m, None)
-        await hub.send({"type": "simulation", "kind": "sleep", "scenario": body.scenario, "measurement": m}, actor.crew_member_id)
+        await hub.send({"type": "simulation", "kind": "sleep", "scenario": body.scenario, "measurement": m}, crew)
         return {"scenario": body.scenario, **result}
 
     @app.post("/demo/radiation")
     async def demo_radiation(body: RadiationDemoIn, actor: Actor = Depends(current)):
         need(actor, "ASTRONAUT", *MEDICAL_ROLES)
-        crew = actor.crew_member_id if actor.role == "ASTRONAUT" else body.crew_member_id
+        crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
         if body.scope == "PERSONAL" and not crew:
             raise HTTPException(400, "Personal radiation simulations require a crew member")
         device_id = "cad-sim" if body.scope == "PERSONAL" else "rem-sim"
@@ -509,6 +521,33 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                                         source="SENSOR", note=f"Demo radiation scenario: {body.scenario.lower()}")
         await hub.send({"type": "radiation", "scenario": body.scenario, "reading": reading}, crew)
         return {"scenario": body.scenario, "reading": reading}
+
+    @app.post("/demo/body-composition")
+    async def demo_body(body: BodyDemoIn, actor: Actor = Depends(current)):
+        """Synthetic InBody-type assessment for the crew member in view, evaluated like a real one."""
+        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
+        _crew_or_404(crew)
+        a = bodycomp.simulate(conn, actor, crew, body.scenario, body.phase, db.now())
+        # The scan's scale reading is a body-mass measurement too: it closes today's body-mass task
+        # and goes through the same personal-baseline check as any other value.
+        m = _store_measurement(actor, crew, "body_mass", a["values"]["body_mass_kg"], parse(a["measured_at"]), "STREAM",
+                               f"From body composition scan {a['id']}", device_id="bia-sim")
+        a["body_mass"] = await _after_measurement(actor, m, None)
+        await hub.send({"type": "body_composition", "id": a["id"]}, crew)
+        if a["alert_id"]:
+            await hub.send({"type": "alerts"}, crew)
+        return a
+
+    @app.get("/body-composition/{crew_member_id}")
+    async def body_composition(crew_member_id: str, actor: Actor = Depends(current)):
+        _crew_or_404(crew_member_id)
+        medical_access(actor, crew_member_id)
+        items = bodycomp.history(conn, crew_member_id)
+        return {"assessments": items, "latest": items[-1] if items else None,
+                "reference": bodycomp.reference(conn, crew_member_id, "BIA"), "rule": bodycomp.RULE,
+                "methods": bodycomp.METHODS, "segments": bodycomp.SEGMENT_LABEL,
+                "scenarios": {k: v["label"] for k, v in bodycomp.SCENARIOS.items()}}
 
     # -------------------------------------------------------------- measurements
 
@@ -633,7 +672,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                                              fault_at_min=17 if fault else None,
                                              invalid_window=invalid_window, hr_offset=hr_offset, spikes=spikes)
         for x in samples:
-            await hub.send({"type": "sample", "session_id": s["id"], **x}, s["crew_member_id"])
+            await hub.send({"type": "sample", "session_id": s["id"], "crew_member_id": s["crew_member_id"], **x}, s["crew_member_id"])
             await asyncio.sleep(PLAYBACK_S)
         result = devices.finish_session(conn, actor, s["id"], samples, faulted=fault, scenario=scenario)
         running.pop(s["id"], None)
@@ -670,9 +709,9 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                               "AND due_at <= ? GROUP BY status", crew, iso(db.now()))
         sessions = db.rows(conn, "SELECT summary_json, ended_at FROM sensor_sessions WHERE crew_member_id = ? "
                                  "AND status = 'COMPLETED' ORDER BY ended_at", crew)
-        sums = [json.loads(s["summary_json"]) for s in sessions]
+        sums = [(json.loads(s["summary_json"]), s["ended_at"]) for s in sessions]
         return {"compliance": tasks, "sessions": len(sums),
-                "hr_mean_history": [s["hr_mean"] for s in sums],
+                "hr_mean_history": [{"value": s["hr_mean"], "measured_at": at} for s, at in sums if s.get("hr_mean") is not None],
                 "sleep": intelligence.trends(conn, crew, "sleep_hours", db.now(), 14),
                 "rpe": db.rows(conn, "SELECT value, measured_at FROM measurements WHERE crew_member_id = ? AND metric='rpe' "
                                      "AND superseded = 0 ORDER BY measured_at DESC LIMIT 14", crew),
@@ -755,6 +794,8 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             items.append({"at": t["completed_at"], "kind": "task", "data": protocols.with_evidence(conn, t)})
         for r in db.rows(conn, "SELECT * FROM radiation_readings WHERE crew_member_id = ?", crew_member_id):
             items.append({"at": r["measured_at"], "kind": "radiation", "data": r})
+        for b in bodycomp.history(conn, crew_member_id):
+            items.append({"at": b["measured_at"], "kind": "body", "data": b})
         for e in clinical.logbook(conn, crew_member_id, include_private=actor.role in MEDICAL_ROLES):
             items.append({"at": e["created_at"], "kind": "log", "data": e})
         return sorted(items, key=lambda i: i["at"], reverse=True)
@@ -774,7 +815,9 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             "alerts": [intelligence.explain(a) for a in q("SELECT * FROM alerts WHERE crew_member_id = ?")],
             "radiation": q("SELECT * FROM radiation_readings WHERE crew_member_id = ?"),
             "eva": q("SELECT * FROM eva_events WHERE crew_member_id = ?"),
+            "body_composition": bodycomp.history(conn, crew_member_id),
             "provenance": {"rule": intelligence.RULE, "advisory_model": intelligence.ADVISORY_MODEL,
+                           "body_composition_rule": bodycomp.RULE,
                            "devices": "All device data in this export is SIMULATED."},
         }
 

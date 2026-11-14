@@ -124,6 +124,19 @@ CREATE TABLE IF NOT EXISTS radiation_readings (
 );
 CREATE INDEX IF NOT EXISTS radiation_lookup ON radiation_readings (scope, crew_member_id, measured_at);
 
+-- Body composition assessments (BIA/DXA/MRI). Segmental lean mass in segments_json;
+-- evaluation_json holds the rule-based comparison with the same-method preflight reference.
+CREATE TABLE IF NOT EXISTS body_composition (
+  id TEXT PRIMARY KEY, crew_member_id TEXT NOT NULL, measured_at TEXT NOT NULL,
+  phase TEXT NOT NULL CHECK (phase IN ('PREFLIGHT','INFLIGHT','POSTFLIGHT')), mission_day INTEGER,
+  method TEXT NOT NULL CHECK (method IN ('BIA','DXA','MRI','OTHER')), device TEXT NOT NULL,
+  values_json TEXT NOT NULL, segments_json TEXT NOT NULL, conditions_json TEXT NOT NULL,
+  quality TEXT NOT NULL CHECK (quality IN ('GOOD','DEGRADED','INVALID')),
+  source TEXT NOT NULL CHECK (source IN ('SEED','SIMULATED','MANUAL','IMPORT')), scenario TEXT,
+  evaluation_json TEXT NOT NULL, alert_id TEXT, entered_by TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS body_composition_crew ON body_composition (crew_member_id, measured_at);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL,
   action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL, detail_json TEXT NOT NULL

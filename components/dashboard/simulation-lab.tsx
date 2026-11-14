@@ -34,7 +34,9 @@ const RADIATION_SCOPE = [
 ] as const;
 
 export function SimulationLab() {
-  const { crew, refresh } = useSession();
+  const { crew, user, refresh } = useSession();
+  // The bio-monitor is worn by the signed-in crew member, so exercise sessions are always their own.
+  const own = user.crewMemberId === crew;
   const tasks = useData<Task[]>(`/tasks?crew_member_id=${crew}`);
   const [sleep, setSleep] = useState<(typeof SLEEP)[number][0]>("REGULAR");
   const [exercise, setExercise] = useState<(typeof EXERCISE)[number][0]>("STANDARD");
@@ -55,25 +57,25 @@ export function SimulationLab() {
     <Card className="border-primary/25 bg-primary/[0.03]">
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Activity className="size-4 text-primary" />Simulation lab</CardTitle>
-        <CardDescription>Run synthetic cases against the task, evidence and baseline pipeline.</CardDescription>
+        <CardDescription>Run synthetic cases for {crew} against the task, evidence and baseline pipeline.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 lg:grid-cols-3">
         <SimulationControl icon={Moon} label="Sleep" value={sleep} options={SLEEP} busy={busy === "sleep"}
-          onChange={(value) => setSleep(value as typeof sleep)} onRun={() => run("sleep", () => api("/demo/sleep", { body: { scenario: sleep } }), "Sleep simulation recorded")} />
-        <SimulationControl icon={Activity} label="Exercise" value={exercise} options={EXERCISE} busy={busy === "exercise"}
+          onChange={(value) => setSleep(value as typeof sleep)} onRun={() => run("sleep", () => api("/demo/sleep", { body: { scenario: sleep, crew_member_id: crew } }), "Sleep simulation recorded")} />
+        <SimulationControl icon={Activity} label={own ? "Exercise" : "Exercise · own sensor only"} value={exercise} options={EXERCISE} busy={busy === "exercise"} disabled={!own}
           onChange={(value) => setExercise(value as typeof exercise)} onRun={() => run("exercise", () => api("/sessions", { body: { task_id: exerciseTask?.id ?? null, scenario: exercise } }), "Exercise simulation started")} />
         <SimulationControl icon={Radiation} label="Radiation" value={radiation} options={RADIATION} secondaryValue={radiationScope} secondaryOptions={RADIATION_SCOPE} busy={busy === "radiation"}
           onChange={(value) => setRadiation(value as typeof radiation)} onSecondaryChange={(value) => setRadiationScope(value as typeof radiationScope)}
-          onRun={() => run("radiation", () => api("/demo/radiation", { body: { scenario: radiation, scope: radiationScope } }), "Radiation reading recorded")} />
+          onRun={() => run("radiation", () => api("/demo/radiation", { body: { scenario: radiation, scope: radiationScope, crew_member_id: crew } }), "Radiation reading recorded")} />
       </CardContent>
     </Card>
   );
 }
 
-function SimulationControl({ icon: Icon, label, value, options, secondaryValue, secondaryOptions, busy, onChange, onSecondaryChange, onRun }: {
+function SimulationControl({ icon: Icon, label, value, options, secondaryValue, secondaryOptions, busy, disabled, onChange, onSecondaryChange, onRun }: {
   icon: typeof Activity; label: string; value: string; options: readonly (readonly [string, string])[];
   secondaryValue?: string; secondaryOptions?: readonly (readonly [string, string])[];
-  busy: boolean; onChange: (value: string) => void; onSecondaryChange?: (value: string) => void; onRun: () => void;
+  busy: boolean; disabled?: boolean; onChange: (value: string) => void; onSecondaryChange?: (value: string) => void; onRun: () => void;
 }) {
   return (
     <div className="rounded-lg border bg-background/50 p-3">
@@ -89,7 +91,7 @@ function SimulationControl({ icon: Icon, label, value, options, secondaryValue, 
             <SelectContent>{secondaryOptions.map(([key, text]) => <SelectItem key={key} value={key}>{text}</SelectItem>)}</SelectContent>
           </Select>
         )}
-        <Button onClick={onRun} disabled={busy}>{busy ? "Running…" : "Run"}</Button>
+        <Button onClick={onRun} disabled={busy || disabled}>{busy ? "Running…" : "Run"}</Button>
       </div>
     </div>
   );
