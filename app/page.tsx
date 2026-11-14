@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Satellite, ShieldCheck, Stethoscope, UserRound, Wrench } from "lucide-react";
 import { api, session, type User } from "@/lib/api";
-import { ErrorAlert, SimulatedNote } from "@/components/astra";
+import { ErrorAlert } from "@/components/astra";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -63,7 +63,6 @@ export default function Login() {
             ))}
           </dl>
         </div>
-        <p className="relative font-mono text-xs text-muted-foreground">Demo onboard node · not a certified medical device</p>
       </section>
 
       <section className="flex items-center justify-center p-4 md:p-10">
@@ -96,7 +95,6 @@ export default function Login() {
               </div>
               <ErrorAlert error={error} title="Sign-in failed" />
               <Button size="lg" disabled={busy}>{busy ? "Signing in…" : <>Sign in <ArrowRight /></>}</Button>
-              <SimulatedNote>All sensors and the ground link are simulated. Protocol frequencies are demo placeholders.</SimulatedNote>
             </form>
           </CardContent>
         </Card>
