@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useFlightPlayback } from "@/lib/cognitive-load";
 import { SimulationLab } from "@/components/dashboard/simulation-lab";
 import { ExerciseSessionList, type ExerciseSession } from "@/components/exercise/exercise-session-list";
 
@@ -41,6 +42,7 @@ export function View() {
 function Exercise() {
   const params = useSearchParams();
   const { user, crew, subscribe, refresh } = useSession();
+  const cognitivePlayback = useFlightPlayback("/samples/muestra_vuelo.json");
   const tasks = useData<Task[]>(`/tasks?crew_member_id=${crew}`);
   const summary = useData<ExSummary>(`/exercise/summary?crew_member_id=${crew}`);
   const sessions = useData<ExerciseSession[]>(`/sessions?crew_member_id=${crew}`);
@@ -142,7 +144,7 @@ function Exercise() {
         </Card>
       )}
 
-      <SimulationLab />
+      <SimulationLab playback={cognitivePlayback} />
       <ExerciseSessionList sessions={sessions.data ?? []} loading={!sessions.data} />
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { Activity, Moon, Radiation } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, BrainCircuit, Moon, Radiation } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Task } from "@/lib/api";
+import type { FlightPlayback } from "@/lib/cognitive-load";
 import { useData, useSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
 
 const SLEEP = [
   ["BAD", "Bad sleep · 5 h"],
@@ -32,9 +34,12 @@ const RADIATION_SCOPE = [
   ["PERSONAL", "Personal · CAD"],
   ["AREA", "Area · REM/HERA"],
 ] as const;
+const COGNITIVE_LOAD = [["FLIGHT", "Flight playback"]] as const;
 
-export function SimulationLab() {
+export function SimulationLab({ playback }: { playback: FlightPlayback }) {
   const { crew, user, refresh } = useSession();
+  const { current, data } = playback;
+  const alertState = useRef(false);
   // The bio-monitor is worn by the signed-in crew member, so exercise sessions are always their own.
   const own = user.crewMemberId === crew;
   const tasks = useData<Task[]>(`/tasks?crew_member_id=${crew}`);
@@ -43,6 +48,30 @@ export function SimulationLab() {
   const [radiation, setRadiation] = useState<(typeof RADIATION)[number][0]>("NORMAL");
   const [radiationScope, setRadiationScope] = useState<(typeof RADIATION_SCOPE)[number][0]>("PERSONAL");
   const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sample = current;
+    if (!sample?.alerta_activa) {
+      alertState.current = false;
+      return;
+    }
+    if (alertState.current || !data) return;
+    alertState.current = true;
+    api("/demo/cognitive-load", {
+      body: {
+        crew_member_id: crew,
+        phase: sample.phase,
+        cognitive_load: sample.cognitive_load,
+        z: sample.z,
+        baseline: data.baseline,
+      },
+    }).then(() => {
+      toast.success("Cognitive-load alert recorded");
+      refresh();
+    }).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Unable to record cognitive-load alert");
+    });
+  }, [crew, current, data, refresh]);
 
   async function run(kind: string, action: () => Promise<unknown>, success: string) {
     setBusy(kind);
@@ -59,7 +88,7 @@ export function SimulationLab() {
         <CardTitle className="flex items-center gap-2"><Activity className="size-4 text-primary" />Simulation lab</CardTitle>
         <CardDescription>Run synthetic cases for {crew} against the task, evidence and baseline pipeline.</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3 lg:grid-cols-3">
+      <CardContent className="grid gap-3 lg:grid-cols-4">
         <SimulationControl icon={Moon} label="Sleep" value={sleep} options={SLEEP} busy={busy === "sleep"}
           onChange={(value) => setSleep(value as typeof sleep)} onRun={() => run("sleep", () => api("/demo/sleep", { body: { scenario: sleep, crew_member_id: crew } }), "Sleep simulation recorded")} />
         <SimulationControl icon={Activity} label={own ? "Exercise" : "Exercise · own sensor only"} value={exercise} options={EXERCISE} busy={busy === "exercise"} disabled={!own}
@@ -67,6 +96,17 @@ export function SimulationLab() {
         <SimulationControl icon={Radiation} label="Radiation" value={radiation} options={RADIATION} secondaryValue={radiationScope} secondaryOptions={RADIATION_SCOPE} busy={busy === "radiation"}
           onChange={(value) => setRadiation(value as typeof radiation)} onSecondaryChange={(value) => setRadiationScope(value as typeof radiationScope)}
           onRun={() => run("radiation", () => api("/demo/radiation", { body: { scenario: radiation, scope: radiationScope, crew_member_id: crew } }), "Radiation reading recorded")} />
+        <div>
+          <SimulationControl icon={BrainCircuit} label="Launch / Cognitive Load" value="FLIGHT" options={COGNITIVE_LOAD} busy={busy === "cognitive-load" || playback.loading || !playback.data}
+            onChange={() => undefined} onRun={() => run("cognitive-load", async () => playback.start(), "Cognitive-load playback started")} />
+          <div className="mt-2 px-1">
+            <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>{playback.current?.phase ?? "standby"}</span>
+              <span>{Math.round(playback.current?.cognitive_load ?? 0)}%</span>
+            </div>
+            <Progress value={playback.current?.cognitive_load ?? 0} className="mt-1 h-1.5" aria-label="Cognitive load" />
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

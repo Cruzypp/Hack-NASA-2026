@@ -47,3 +47,16 @@ backend/.pytest_cache/
 *.db
 *.db-wal
 *.db-shm
+
+# local datasets and generated processing artifacts
+data/
+*.parquet
+*.csv
+!public/samples/*.json
+.gdrive/
+scripts/.cache/
+.venv/
+node_modules/
+__pycache__/
+.env
+.env.local

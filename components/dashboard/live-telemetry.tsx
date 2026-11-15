@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Activity, Radio, Radiation } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, BrainCircuit, Radio, Radiation } from "lucide-react";
 import { useSession } from "@/lib/session";
+import type { FlightPlayback } from "@/lib/cognitive-load";
 import { EmptyState } from "@/components/astra";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -11,8 +12,8 @@ type Point = { time: string; value: number };
 type HistoricalPoint = { measured_at: string; value: number };
 
 /** Seeded from stored history; mount with `key={crew}` so switching crew member starts fresh. */
-export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initialSleep = [] }: {
-  crew: string; initialPersonal: HistoricalPoint[]; initialArea?: HistoricalPoint[]; initialSleep?: HistoricalPoint[];
+export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initialSleep = [], cognitivePlayback }: {
+  crew: string; initialPersonal: HistoricalPoint[]; initialArea?: HistoricalPoint[]; initialSleep?: HistoricalPoint[]; cognitivePlayback: FlightPlayback;
 }) {
   const { subscribe } = useSession();
   const [heartRate, setHeartRate] = useState<Point[]>([]);
@@ -25,6 +26,10 @@ export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initial
   const [sleep, setSleep] = useState<Point[]>(initialSleep.slice(-24).map((point) => ({
     time: point.measured_at.slice(5, 10), value: point.value,
   })));
+  const cognitiveLoad = useMemo(() => cognitivePlayback.trace.map((sample) => ({
+    time: `${sample.t.toFixed(1)}s`,
+    value: sample.cognitive_load,
+  })), [cognitivePlayback.trace]);
 
   useEffect(() => subscribe((event) => {
     if (event.crew_member_id && event.crew_member_id !== crew && event.type !== "radiation") return;
@@ -54,11 +59,12 @@ export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initial
         <CardTitle className="flex items-center gap-2"><Radio className="size-4 text-primary" />Live telemetry</CardTitle>
         <CardDescription>Live stream from onboard adapters.</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-4 lg:grid-cols-4">
+      <CardContent className="grid gap-4 lg:grid-cols-5">
         <TelemetryChart icon={Activity} title="Heart rate" unit="bpm" color="var(--primary)" points={heartRate} empty="Start an exercise simulation to stream HR." />
         <TelemetryChart icon={Activity} title="Sleep duration" unit="h" color="var(--chart-3)" points={sleep} empty="Run a sleep simulation to add a sleep result." />
         <TelemetryChart icon={Radiation} title="Personal dose rate" unit="µGy/h" color="var(--warning)" points={personal} empty="No personal radiation stream yet." />
         <TelemetryChart icon={Radiation} title="Area dose rate" unit="µGy/h" color="var(--chart-4)" points={area} empty="No area monitor readings yet." />
+        <TelemetryChart icon={BrainCircuit} title="Cognitive load" unit="%" color="var(--chart-2)" points={cognitiveLoad} empty="Run the cognitive-load playback to stream load." />
       </CardContent>
     </Card>
   );

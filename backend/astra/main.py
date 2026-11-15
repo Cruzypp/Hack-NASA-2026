@@ -73,6 +73,14 @@ class BodyDemoIn(BaseModel):
     crew_member_id: str | None = None
 
 
+class CognitiveLoadDemoIn(BaseModel):
+    phase: str = Field(min_length=1, max_length=32)
+    cognitive_load: float = Field(ge=0, le=100)
+    z: dict[str, float]
+    baseline: dict[str, dict[str, float]]
+    crew_member_id: str | None = None
+
+
 class ActivityIn(BaseModel):
     duration_min: float = Field(ge=0, le=600)
     note: str | None = Field(default=None, max_length=500)
@@ -521,6 +529,32 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                                         source="SENSOR", note=f"Demo radiation scenario: {body.scenario.lower()}")
         await hub.send({"type": "radiation", "scenario": body.scenario, "reading": reading}, crew)
         return {"scenario": body.scenario, "reading": reading}
+
+    @app.post("/demo/cognitive-load")
+    async def demo_cognitive_load(body: CognitiveLoadDemoIn, actor: Actor = Depends(current)):
+        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
+        if not crew:
+            raise HTTPException(400, "Cognitive-load simulations require a crew member")
+        _crew_or_404(crew)
+        rule = {"id": "cognitive-iqr-z", "version": "0.1", "threshold_z": 3.0,
+                "provenance": "ASTRA experimental rule; not NASA-specified."}
+        explanation = {
+            "phase": body.phase,
+            "cognitive_load": body.cognitive_load,
+            "z": body.z,
+            "baseline": body.baseline,
+            "rule": rule,
+            "summary": f"Cognitive load alert during {body.phase}: z-score threshold sustained",
+            "recommendation": "Crew Medical Officer review. ASTRA does not diagnose.",
+        }
+        with db.tx(conn):
+            alert_id = protocols.raise_alert(
+                conn, crew, "MEDICAL", "COGNITIVE_LOAD", "REVIEW",
+                "Cognitive load outside experimental baseline", explanation,
+                rule_id=rule["id"], rule_version=rule["version"])
+        await hub.send({"type": "alerts", "kind": "cognitive-load", "alert_id": alert_id}, crew)
+        return {"alert_id": alert_id, "phase": body.phase, "cognitive_load": body.cognitive_load}
 
     @app.post("/demo/body-composition")
     async def demo_body(body: BodyDemoIn, actor: Actor = Depends(current)):

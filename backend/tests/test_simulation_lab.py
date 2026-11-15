@@ -47,6 +47,27 @@ def test_simulated_radiation_persists_anomalous_reading(client):
     assert reading["dose_rate_uGy_h"] > 18
 
 
+def test_cognitive_load_demo_creates_medical_alert(client):
+    headers = login(client, "vega", "1111")
+    result = client.post("/demo/cognitive-load", headers=headers, json={
+        "phase": "launch",
+        "cognitive_load": 82.6,
+        "z": {"ECG": 3.1, "GSR": 3.6, "EEG_FP1": 3.2, "EEG_Cz": 2.9},
+        "baseline": {
+            "ECG": {"median": 0, "iqr": 0.42},
+            "GSR": {"median": 0, "iqr": 0.18},
+            "EEG_FP1": {"median": 0, "iqr": 0.27},
+            "EEG_Cz": {"median": 0, "iqr": 0.24},
+        },
+    })
+    assert result.status_code == 200, result.text
+    alert = next(a for a in client.get("/alerts", headers=headers).json() if a["id"] == result.json()["alert_id"])
+    assert alert["id"] == result.json()["alert_id"]
+    assert alert["category"] == "MEDICAL"
+    assert alert["rule_id"] == "cognitive-iqr-z"
+    assert alert["explanation"]["z"]["GSR"] == 3.6
+
+
 def test_exercise_peak_scenario_creates_pronounced_bpm_spikes():
     samples = devices.simulate_exercise(seed=7, minutes=30, spikes=((7, 8, 45), (18, 19, 60)))
     summary = devices.summarize(samples)

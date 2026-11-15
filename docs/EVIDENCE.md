@@ -5,6 +5,29 @@ Las referencias NASA se usan como contexto de diseño; los documentos deben cons
 trasladar cualquier valor al sistema. Donde este documento resume una fuente, el resumen es de alto nivel y debe
 verificarse contra el original.
 
+## Telemetría y datos OSD
+
+- Los datos fisiológicos de alta frecuencia proceden del conjunto Inspiration4/LOFT
+  distribuido por NASA OSDR. El procesamiento de Parquet a 256 Hz es offline y
+  se ejecuta con `scripts/procesar_telemetria.py`.
+- La consola Next.js no lee Parquet ni calcula estadística pesada: reproduce
+  únicamente `public/samples/muestra_vuelo.json` a 8 Hz según
+  `docs/FLIGHT_DATA_CONTRACT.md`.
+- Los paneles CBC (OSD-569) y CMP (OSD-575) se importan como medidas lentas
+  desde los archivos `*_TRANSFORMED` y `*_SUBMITTED`. Se evalúan con
+  `intelligence.assess()` y su baseline personal de mediana + MAD; no usan la
+  ventana móvil de 512 muestras.
+
+Todas las reglas, z robustos, ventanas, histéresis y umbrales descritos para
+ASTRA son decisiones experimentales del prototipo. **No son umbrales oficiales
+de NASA, límites de exposición, criterios diagnósticos ni recomendaciones
+médicas.**
+
+| Pipeline | Datos | Regla ASTRA experimental | Ejecución |
+|---|---|---|---|
+| Flight playback | Inspiration4/LOFT fisiológico, 256 Hz | IQR robust z, umbral 3, histéresis de 1 s, salida 8 Hz | Offline |
+| Laboratorio | OSDR OSD-569 CBC y OSD-575 CMP | Mediana + MAD, robust z ≥ 3 con baseline personal | Offline/import |
+
 ## Basado en fuentes NASA (como principio de diseño, no como valores)
 
 | Comportamiento | Fuente de contexto |

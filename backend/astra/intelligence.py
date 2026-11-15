@@ -25,12 +25,23 @@ METRICS = {
     "body_mass": {"unit": "kg", "range": (30, 200), "spread_floor": 0.3, "label": "Body mass"},
     "sleep_hours": {"unit": "h", "range": (0, 16), "spread_floor": 0.3, "label": "Sleep duration"},
     "rpe": {"unit": "Borg 6-20", "range": (6, 20), "spread_floor": 1.0, "label": "Perceived exertion"},
+    "cbc_hemoglobin": {"unit": "g/dL", "range": (5, 25), "spread_floor": 0.1, "label": "CBC hemoglobin"},
+    "cbc_hematocrit": {"unit": "%", "range": (10, 70), "spread_floor": 0.5, "label": "CBC hematocrit"},
+    "cbc_wbc": {"unit": "10^3/µL", "range": (0, 100), "spread_floor": 0.2, "label": "CBC white blood cells"},
+    "cbc_platelets": {"unit": "10^3/µL", "range": (10, 1_500), "spread_floor": 5.0, "label": "CBC platelets"},
+    "cmp_glucose": {"unit": "mg/dL", "range": (20, 600), "spread_floor": 2.0, "label": "CMP glucose"},
+    "cmp_creatinine": {"unit": "mg/dL", "range": (0, 20), "spread_floor": 0.05, "label": "CMP creatinine"},
+    "cmp_sodium": {"unit": "mmol/L", "range": (80, 200), "spread_floor": 1.0, "label": "CMP sodium"},
+    "cmp_potassium": {"unit": "mmol/L", "range": (1, 15), "spread_floor": 0.1, "label": "CMP potassium"},
+    "cmp_albumin": {"unit": "g/dL", "range": (0, 10), "spread_floor": 0.1, "label": "CMP albumin"},
 }
 
 RULE = {
     "id": "baseline-robust-z", "version": "1.0.0", "threshold_z": 3.0,
     "baseline_window_days": 28, "min_points": 7, "post_exercise_window_min": 60,
-    "monitored": ["resting_hr", "sleep_hours", "systolic_bp", "diastolic_bp", "body_temp", "body_mass"],
+    "monitored": ["resting_hr", "sleep_hours", "systolic_bp", "diastolic_bp", "body_temp", "body_mass",
+                  "cbc_hemoglobin", "cbc_hematocrit", "cbc_wbc", "cbc_platelets",
+                  "cmp_glucose", "cmp_creatinine", "cmp_sodium", "cmp_potassium", "cmp_albumin"],
     "provenance": "ASTRA experimental rule — thresholds are not NASA-specified and require flight surgeon review.",
 }
 ADVISORY_MODEL = {"name": "IsolationForest", "version": f"astra-iforest-0.1/sklearn-{sklearn.__version__}",
