@@ -31,7 +31,7 @@ const NAV = [
   ] },
   { group: "Clinical", items: [
     { href: "/crew", label: "Crew Health", icon: Stethoscope, medical: true },
-    { href: "/alerts", label: "Alerts & Follow-ups", icon: BellRing, ops: true },
+    { href: "/alerts", label: "Alerts & Follow-ups", icon: BellRing, ops: true, medical: true },
     { href: "/records", label: "Health Records", icon: FileHeart },
   ] },
   { group: "Systems", items: [
@@ -40,7 +40,7 @@ const NAV = [
 ];
 
 // Medical accounts: their clinical dashboard plus read-only consultation of the crew member's data.
-const MEDICAL_PAGES = ["/crew", "/measurements", "/exercise", "/body"];
+const MEDICAL_PAGES = ["/crew", "/alerts", "/measurements", "/exercise", "/body"];
 const MEDICAL_NAV = [{ group: "Clinical", items: MEDICAL_PAGES.map((href) => NAV.flatMap((g) => g.items).find((n) => n.href === href)!) }];
 export const homeFor = (u: User) => (isMedical(u.role) ? "/crew" : "/dashboard");
 
@@ -105,7 +105,7 @@ function AppSidebar() {
       <SidebarContent>
         {(isMedical(user.role) ? MEDICAL_NAV : NAV).map((g) => {
           const items = isMedical(user.role) ? g.items
-            : g.items.filter((n) => (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) && !("medical" in n));
+            : g.items.filter((n) => (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) && (!("medical" in n) || user.role === "MISSION_OPERATOR"));
           if (!items.length) return null;
           return (
             <SidebarGroup key={g.group}>
