@@ -30,7 +30,7 @@ const NAV = [
   ] },
   { group: "Clinical", items: [
     { href: "/crew", label: "Crew Health", icon: Stethoscope, medical: true },
-    { href: "/alerts", label: "Alerts & Follow-ups", icon: BellRing, ops: true },
+    { href: "/alerts", label: "Alerts & Follow-ups", icon: BellRing, ops: true, medical: true },
     { href: "/records", label: "Health Records", icon: FileHeart },
   ] },
   { group: "Systems", items: [
@@ -91,7 +91,9 @@ function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         {NAV.map((g) => {
-          const items = g.items.filter((n) => (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) && (!("medical" in n) || isMedical(user.role)));
+          const items = g.items.filter((n) =>
+            (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) &&
+            (!("medical" in n) || isMedical(user.role) || user.role === "MISSION_OPERATOR"));
           if (!items.length) return null;
           return (
             <SidebarGroup key={g.group}>
