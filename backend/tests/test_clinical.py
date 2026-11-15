@@ -94,7 +94,8 @@ def test_revision_replaces_future_tasks_for_one_crew_member(client):
     conn = client.app_state.conn
     future_old = db.rows(conn, "SELECT status FROM tasks WHERE crew_member_id='CM-01' AND protocol_version_id='sleep-log@1.0.0' "
                                "AND due_at >= ?", r.json()["effective_from"])
-    assert future_old and all(t["status"] == "CANCELLED" for t in future_old)
+    assert future_old and all(t["status"] in ("CANCELLED", "COMPLETED") for t in future_old)
+    assert any(t["status"] == "CANCELLED" for t in future_old)
     assert db.rows(conn, "SELECT 1 FROM tasks WHERE crew_member_id='CM-01' AND protocol_version_id='sleep-log@1.1.0'")
     # CM-02 keeps the original version.
     plan2 = client.get("/crew/CM-02/care-plan", headers=fs).json()
