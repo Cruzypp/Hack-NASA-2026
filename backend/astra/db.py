@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   category TEXT NOT NULL CHECK (category IN ('MEDICAL','OPERATIONAL')),
   type TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, explanation_json TEXT NOT NULL,
   rule_id TEXT, rule_version TEXT, status TEXT NOT NULL CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED')),
-  created_at TEXT NOT NULL, resolved_by TEXT, resolved_at TEXT, resolution_note TEXT, follow_up_task_id TEXT
+  created_at TEXT NOT NULL, resolved_by TEXT, resolved_at TEXT, resolution_note TEXT, follow_up_task_id TEXT,
+  notified_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS eva_events (
@@ -136,6 +137,13 @@ CREATE TABLE IF NOT EXISTS body_composition (
   evaluation_json TEXT NOT NULL, alert_id TEXT, entered_by TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS body_composition_crew ON body_composition (crew_member_id, measured_at);
+
+-- Outbound webhook deliveries for alerts (retried with backoff).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY, alert_id TEXT NOT NULL REFERENCES alerts(id), url TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('PENDING','SENT','FAILED')), attempts INTEGER NOT NULL DEFAULT 0,
+  next_at TEXT NOT NULL, sent_at TEXT, last_error TEXT
+);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL,
@@ -189,6 +197,9 @@ def _add_columns(conn, table: str, columns: tuple[tuple[str, str], ...]) -> None
 def _migrate(conn) -> None:
     """Migrations for databases created by earlier versions."""
     _add_columns(conn, "protocol_assignments", (("ended_at", "TEXT"), ("ended_by", "TEXT"), ("end_reason", "TEXT")))
+    if "notified_at" not in {r["name"] for r in conn.execute("PRAGMA table_info(alerts)")}:
+        conn.execute("ALTER TABLE alerts ADD COLUMN notified_at TEXT")
+        conn.execute("UPDATE alerts SET notified_at = created_at")  # existing alerts are old news: don't re-notify them
     sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'protocol_versions'").fetchone()[0]
     if "CLINICAL_DECISION" not in sql:
         # SQLite cannot alter a CHECK constraint: rebuild the table (documented 12-step procedure).

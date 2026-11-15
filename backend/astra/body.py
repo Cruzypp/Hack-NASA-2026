@@ -283,12 +283,8 @@ def _raise(conn, crew: str, a: dict, ev: dict, at: datetime) -> str:
         f"Body composition: {top['title'].lower()}",
         {"summary": ev["summary"], "assessment_id": a["id"], "findings": ev["findings"], "rule": RULE,
          "recommendation": rec}, rule_id=RULE["id"], rule_version=RULE["version"])
-    task = protocols.order_task(conn, SYSTEM, crew, "CMO review: body composition findings", "VERIFICATION",
-                                at + timedelta(hours=24 if ev["status"] == "REVIEW" else 8),
-                                "CRITICAL" if ev["status"] == "ACTION" else "HIGH",
-                                {"kind": "VERIFICATION", "roles": ["CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"]},
-                                source_alert_id=alert_id, note=rec)
-    db.update(conn, "alerts", alert_id, {"follow_up_task_id": task})
+    protocols.request_cmo_review(conn, SYSTEM, crew, alert_id, f"{ev['summary']} {top['action']}",
+                                 "CRITICAL" if ev["status"] == "ACTION" else "HIGH", at)
     return alert_id
 
 

@@ -150,3 +150,38 @@ def process_osd(
             except (KeyError, TypeError, ValueError) as error:
                 report["rejected"].append({"panel": panel, "sample": row.get("sample_name"), "error": str(error)})
     return report
+
+
+def panel(conn: sqlite3.Connection, crew: str) -> dict:
+    """Every CBC/CMP marker for one crew member: history with the lab's own reference
+    range (from the OSD file) and the personal-baseline status of the latest value."""
+    out = {}
+    for panel_name, markers in MARKERS.items():
+        for marker in markers:
+            rows = db.rows(conn, "SELECT id, value, unit, measured_at, source, quality, context_json FROM measurements "
+                                 "WHERE crew_member_id = ? AND metric = ? AND superseded = 0 ORDER BY measured_at",
+                           crew, marker.metric)
+            series = []
+            for r in rows:
+                ctx = json.loads(r.pop("context_json") or "{}")
+                ref = ctx.get("reference_range")
+                r["reference_range"] = ref
+                r["sample_name"] = ctx.get("sample_name")
+                r["in_range"] = None if not ref else ref["min"] <= r["value"] <= ref["max"]
+                series.append(r)
+            latest = series[-1] if series else None
+            item = {"metric": marker.metric, "panel": panel_name, "label": intelligence.METRICS[marker.metric]["label"],
+                    "unit": marker.unit, "series": series, "latest": latest, "status": "NO_DATA"}
+            if latest:
+                b = intelligence.baseline(conn, crew, marker.metric, db.parse(latest["measured_at"]), exclude_id=latest["id"])
+                item["baseline"] = b
+                if b["sufficient"]:
+                    item["z"] = round((latest["value"] - b["median"]) / b["robust_sd"], 2)
+                    item["status"] = ("OUTSIDE_BASELINE" if abs(item["z"]) >= intelligence.RULE["threshold_z"]
+                                      else "WITHIN_BASELINE")
+                else:
+                    item["status"] = "NO_BASELINE"
+            out[marker.metric] = item
+    return {"markers": out, "rule": intelligence.RULE,
+            "note": "Reference ranges come from the OSD laboratory file; the personal baseline needs "
+                    f"{intelligence.RULE['min_points']} values within {intelligence.RULE['baseline_window_days']} days."}

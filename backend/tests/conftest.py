@@ -2,6 +2,7 @@ import os
 
 os.environ["ASTRA_AUTOSTART"] = "0"
 os.environ["ASTRA_PLAYBACK_S"] = "0"
+os.environ["ASTRA_COGNITIVE_TIMESCALE"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient

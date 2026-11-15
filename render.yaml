@@ -1,0 +1,20 @@
+# Render Blueprint for the ASTRA backend. Dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: astra-health-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free            # demo: data resets to the demo seed on each restart. For persistence use `starter` + the disk below.
+    healthCheckPath: /health
+    envVars:
+      - key: ASTRA_CORS
+        sync: false       # your frontend URL, e.g. https://astra-health.vercel.app
+      - key: ASTRA_PUBLIC_URL
+        sync: false
+      - key: ASTRA_DEVICE_KEYS
+        sync: false       # bio-monitor-sim:<random secret>, used by scripts/send-reading.sh
+    # disk:               # paid plans only
+    #   name: astra-data
+    #   mountPath: /data
+    #   sizeGB: 1

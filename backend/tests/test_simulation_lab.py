@@ -47,25 +47,25 @@ def test_simulated_radiation_persists_anomalous_reading(client):
     assert reading["dose_rate_uGy_h"] > 18
 
 
-def test_cognitive_load_demo_creates_medical_alert(client):
+def test_cognitive_playback_persists_samples_and_raises_server_side_alert(client):
     headers = login(client, "vega", "1111")
-    result = client.post("/demo/cognitive-load", headers=headers, json={
-        "phase": "launch",
-        "cognitive_load": 82.6,
-        "z": {"ECG": 3.1, "GSR": 3.6, "EEG_FP1": 3.2, "EEG_Cz": 2.9},
-        "baseline": {
-            "ECG": {"median": 0, "iqr": 0.42},
-            "GSR": {"median": 0, "iqr": 0.18},
-            "EEG_FP1": {"median": 0, "iqr": 0.27},
-            "EEG_Cz": {"median": 0, "iqr": 0.24},
-        },
-    })
-    assert result.status_code == 200, result.text
-    alert = next(a for a in client.get("/alerts", headers=headers).json() if a["id"] == result.json()["alert_id"])
-    assert alert["id"] == result.json()["alert_id"]
-    assert alert["category"] == "MEDICAL"
-    assert alert["rule_id"] == "cognitive-iqr-z"
-    assert alert["explanation"]["z"]["GSR"] == 3.6
+    started = client.post("/cognitive/sessions", headers=headers, json={})
+    assert started.status_code == 200, started.text
+    for _ in range(500):
+        latest = client.get("/cognitive/CM-01", headers=headers).json()["latest"]
+        if latest and latest["status"] == "COMPLETED":
+            break
+        time.sleep(0.01)
+    assert latest["status"] == "COMPLETED" and latest["crew_member_id"] == "CM-01"
+    assert len(latest["trace"]) == started.json()["total"]
+    summary = latest["summary"]
+    assert summary["peak_load"] > 0 and set(summary["mean_by_phase"]) >= {"prelaunch", "launch"}
+    alert = next(a for a in client.get("/alerts", headers=headers).json() if a["id"] == summary["alert_id"])
+    assert alert["rule_id"] == "cognitive-iqr-z" and alert["follow_up_task_id"]
+    assert max(alert["explanation"]["z"].values()) >= 3.0  # from the file's own values, not client input
+    # Cognitive sessions are not exercise sessions.
+    assert all(s["kind"] == "EXERCISE" for s in client.get("/sessions?crew_member_id=CM-01", headers=headers).json())
+    assert client.post("/demo/cognitive-load", headers=headers, json={}).status_code in (404, 405)
 
 
 def test_exercise_peak_scenario_creates_pronounced_bpm_spikes():

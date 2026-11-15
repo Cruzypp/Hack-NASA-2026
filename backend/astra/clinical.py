@@ -330,18 +330,20 @@ def review(conn, crew: str, metric: str, window_days: int, at: datetime, task_id
     with db.tx(conn):
         db.insert(conn, "analysis_reports", report)
         db.record(conn, actor, "REVIEW_COMPLETED", "analysis_report", report["id"], {"status": result["status"]})
-        if result["status"] == "FINDINGS":
+        title = f"{label}: findings in {window_days}-day review"
+        existing = db.one(conn, "SELECT id, follow_up_task_id FROM alerts WHERE crew_member_id = ? AND type = 'PERIODIC_REVIEW_FINDINGS' "
+                                "AND title = ? AND status != 'RESOLVED' ORDER BY created_at DESC LIMIT 1", crew, title)
+        if result["status"] == "FINDINGS" and existing:
+            # Same finding already open: attach this report to it instead of stacking another alert and CMO review.
+            result["alert_id"], result["existing_alert"] = existing["id"], True
+        elif result["status"] == "FINDINGS":
             alert_id = protocols.raise_alert(conn, crew, "MEDICAL", "PERIODIC_REVIEW_FINDINGS", "REVIEW",
-                                             f"{label}: findings in {window_days}-day review",
-                                             {"summary": summary, "report_id": report["id"], "rule": REVIEW_RULE,
+                                             title,
+                                             {"summary": summary, "metric": metric, "report_id": report["id"], "rule": REVIEW_RULE,
                                               "recommendation": "Crew Medical Officer review. ASTRA does not diagnose "
                                                                 "and does not modify the clinical protocol."},
                                              rule_id=REVIEW_RULE["id"], rule_version=REVIEW_RULE["version"])
-            follow = protocols.order_task(conn, SYSTEM, crew, f"CMO review: {label.lower()} {window_days}-day findings",
-                                          "VERIFICATION", at + timedelta(hours=24), "HIGH",
-                                          {"kind": "VERIFICATION", "roles": ["CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"]},
-                                          source_alert_id=alert_id, note=summary)
-            db.update(conn, "alerts", alert_id, {"follow_up_task_id": follow})
+            protocols.request_cmo_review(conn, SYSTEM, crew, alert_id, summary, "HIGH", at)
             result["alert_id"] = alert_id
         if len(missing) >= 2:
             protocols.raise_alert(conn, crew, "OPERATIONAL", "DATA_GAP", "MEDIUM", f"{label}: {len(missing)} days without data",

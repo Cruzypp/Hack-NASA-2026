@@ -185,3 +185,41 @@ def test_future_weeks_are_generated_on_view(client):
     start = db.now() + timedelta(days=21)
     tasks = client.get(f"/tasks?crew_member_id=CM-01&start={db.iso(start)}&end={db.iso(start + timedelta(days=7))}", headers=fs).json()
     assert any(t["protocol_id"] == "sleep-log" for t in tasks)
+
+
+def test_findings_from_several_indicators_share_one_cmo_review(client):
+    from astra import intelligence
+    conn = client.app_state.conn
+    now = db.now()
+    ids = []
+    for metric, value in (("resting_hr", 84.0), ("sleep_hours", 3.9)):
+        m = {"id": db.new_id("msr"), "crew_member_id": "CM-01", "metric": metric, "value": value,
+             "unit": intelligence.METRICS[metric]["unit"], "measured_at": db.iso(now), "source": "MANUAL", "quality": "GOOD",
+             "entered_by": "test", "created_at": db.iso(now)}
+        db.insert(conn, "measurements", m)
+        ids.append(intelligence.assess(conn, m)["follow_up_task_id"])
+    assert ids[0] == ids[1]  # one review, not two
+    task = db.one(conn, "SELECT * FROM tasks WHERE id = ?", ids[0])
+    assert task["title"] == "CMO review · 2 findings" and task["note"].count("•") == 2 and "84 bpm" in task["note"]
+    due = parse(task["due_at"])
+    assert due.strftime("%H:%M") == "10:00" and due >= now + timedelta(hours=2)  # review slot, not detection time + offset
+    cmo = login(client, "okafor", "2222")
+    assert client.post(f"/tasks/{task['id']}/verify", headers=cmo, json={"note": "Both reviewed with crew member"}).json()["accepted"]
+    assert not db.rows(conn, "SELECT 1 FROM alerts WHERE follow_up_task_id = ? AND status != 'RESOLVED'", task["id"])
+    # After verification a new finding opens a fresh review.
+    m = {"id": db.new_id("msr"), "crew_member_id": "CM-01", "metric": "resting_hr", "value": 86.0, "unit": "bpm",
+         "measured_at": db.iso(now), "source": "MANUAL", "quality": "GOOD", "entered_by": "test", "created_at": db.iso(now)}
+    db.insert(conn, "measurements", m)
+    assert intelligence.assess(conn, m)["follow_up_task_id"] != ids[0]
+
+
+def test_cmo_review_lands_inside_crew_working_window(client):
+    from datetime import datetime, timezone
+    conn = client.app_state.conn
+    night = datetime(2026, 11, 15, 1, 28, tzinfo=timezone.utc)
+    day = datetime(2026, 11, 15, 13, 10, tzinfo=timezone.utc)
+    late = datetime(2026, 11, 15, 19, 40, tzinfo=timezone.utc)
+    assert protocols._review_due(conn, night, "CRITICAL") == datetime(2026, 11, 15, 8, 0, tzinfo=timezone.utc)
+    assert protocols._review_due(conn, day, "CRITICAL") == datetime(2026, 11, 15, 15, 0, tzinfo=timezone.utc)
+    assert protocols._review_due(conn, late, "CRITICAL") == datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc)
+    assert protocols._review_due(conn, day, "HIGH") == datetime(2026, 11, 16, 10, 0, tzinfo=timezone.utc)

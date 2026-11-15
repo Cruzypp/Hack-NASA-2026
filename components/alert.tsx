@@ -24,6 +24,14 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
   const canResolve = alert.status !== "RESOLVED" && !alert.follow_up_task_id &&
     (medical ? isMedical(user.role) : user.role !== "ASTRONAUT");
 
+  async function toReview() {
+    try {
+      const t = await api<{ title: string; due_at: string }>(`/alerts/${alert.id}/follow-up`, { body: {} });
+      toast.success("Added to CMO review", { description: `${t.title} · due ${fmtDate(t.due_at)}` });
+      refresh();
+    } catch (x) { toast.error((x as Error).message); }
+  }
+
   async function ack() {
     try { await api(`/alerts/${alert.id}/ack`, { method: "POST" }); toast.success("Alert acknowledged"); refresh(); }
     catch (x) { toast.error((x as Error).message); }
@@ -119,7 +127,8 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
         <CardFooter className="flex flex-wrap items-center gap-2 border-t">
           {alert.status === "OPEN" && user.role !== "ASTRONAUT" && <Button size="sm" variant="outline" onClick={ack}>Acknowledge</Button>}
           {canResolve && <ResolveDialog alert={alert} />}
-          {alert.follow_up_task_id && <p className="text-xs text-muted-foreground">Resolves when follow-up <span className="font-mono">{alert.follow_up_task_id}</span> is verified.</p>}
+          {medical && isMedical(user.role) && !alert.follow_up_task_id && <Button size="sm" variant="outline" onClick={toReview}>Add to CMO review</Button>}
+          {alert.follow_up_task_id && <p className="text-xs text-muted-foreground">Included in a CMO review; resolves when that review is verified.</p>}
         </CardFooter>
       )}
     </Card>

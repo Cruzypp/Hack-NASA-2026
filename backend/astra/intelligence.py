@@ -37,7 +37,7 @@ METRICS = {
 }
 
 RULE = {
-    "id": "baseline-robust-z", "version": "1.0.0", "threshold_z": 3.0,
+    "id": "baseline-robust-z", "version": "1.1.0", "threshold_z": 3.0, "high_z": 5.0,
     "baseline_window_days": 28, "min_points": 7, "post_exercise_window_min": 60,
     "monitored": ["resting_hr", "sleep_hours", "systolic_bp", "diastolic_bp", "body_temp", "body_mass",
                   "cbc_hemoglobin", "cbc_hematocrit", "cbc_wbc", "cbc_platelets",
@@ -155,15 +155,17 @@ def assess(conn, measurement: dict) -> dict:
                            + ". ASTRA does not diagnose and does not modify the clinical protocol."),
     }
     with db.tx(conn):
-        alert_id = protocols.raise_alert(conn, crew, "MEDICAL", "PHYSIO_DEVIATION", "REVIEW",
+        # Graded by magnitude (ASTRA experimental): ≥ 5 robust SD notifies as HIGH, 3–5 as REVIEW.
+        severity = "HIGH" if abs(z) >= RULE["high_z"] else "REVIEW"
+        alert_id = protocols.raise_alert(conn, crew, "MEDICAL", "PHYSIO_DEVIATION", severity,
                                          f"{m['label']} outside personal baseline", explanation,
                                          rule_id=RULE["id"], rule_version=RULE["version"])
-        task_id = protocols.order_task(
-            conn, SYSTEM, crew, f"CMO verification: {m['label'].lower()} deviation", "VERIFICATION",
-            at + timedelta(hours=4), "HIGH",
-            {"kind": "VERIFICATION", "roles": ["CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"]},
-            source_alert_id=alert_id, note=explanation["recommendation"])
-        db.update(conn, "alerts", alert_id, {"follow_up_task_id": task_id})
+        factors = ", ".join(c["factor"].replace("_", " ") for c in ctx)
+        task_id = protocols.request_cmo_review(
+            conn, SYSTEM, crew, alert_id,
+            f"{measurement['value']:g} {m['unit']} at {measurement['measured_at'][:16].replace('T', ' ')}Z "
+            f"({measurement['source'].lower()}), baseline {b['median']:g} ± {b['robust_sd']:g}, z {z:+.1f}"
+            + (f"; context: {factors}" if factors else ""), "HIGH", at)
     return {**explanation, "alert_id": alert_id, "follow_up_task_id": task_id}
 
 

@@ -26,11 +26,11 @@ def test_leg_atrophy_raises_alert_and_follow_up(client):
 
 
 def test_stable_and_fluid_shift(client):
-    h = login(client, "okafor", "2222")
-    stable = client.post("/demo/body-composition", headers=h, json={"scenario": "STABLE", "crew_member_id": "CM-01"}).json()
+    h = login(client, "vega", "1111")
+    stable = client.post("/demo/body-composition", headers=h, json={"scenario": "STABLE"}).json()
     assert stable["crew_member_id"] == "CM-01"
     assert stable["evaluation"]["status"] in ("WITHIN_REFERENCE", "WATCH") and not stable["alert_id"]
-    fluid = client.post("/demo/body-composition", headers=h, json={"scenario": "FLUID_SHIFT", "crew_member_id": "CM-01"}).json()
+    fluid = client.post("/demo/body-composition", headers=h, json={"scenario": "FLUID_SHIFT"}).json()
     assert fluid["quality"] == "DEGRADED"
     assert any(f["code"] == "FLUID_SHIFT" for f in fluid["evaluation"]["findings"])
 
@@ -51,7 +51,19 @@ def test_scan_feeds_body_mass_metric_and_context(client):
     assert ctx["exercise_scheduled"] > 0 and ctx["exercise_adherence"] is not None
 
 
-def test_medical_sleep_simulation_targets_crew_in_view(client):
-    h = login(client, "okafor", "2222")  # CMO is also crew member CM-02
-    r = client.post("/demo/sleep", headers=h, json={"scenario": "BAD", "crew_member_id": "CM-01"}).json()
-    assert r["measurement"]["crew_member_id"] == "CM-01"
+def test_medical_accounts_are_read_only_for_health_data(client):
+    for user, pin in (("okafor", "2222"), ("lindqvist", "3333")):
+        h = login(client, user, pin)
+        assert client.get("/body-composition/CM-01", headers=h).status_code == 200
+        assert client.get("/measurements?crew_member_id=CM-01", headers=h).status_code == 200
+        m = client.get("/measurements?crew_member_id=CM-01", headers=h).json()[0]
+        for path, body in (("/demo/sleep", {"scenario": "BAD", "crew_member_id": "CM-01"}),
+                           ("/demo/body-composition", {"scenario": "STABLE", "crew_member_id": "CM-01"}),
+                           ("/demo/radiation", {"scenario": "NORMAL", "crew_member_id": "CM-01"}),
+                           ("/cognitive/sessions", {"crew_member_id": "CM-01"}),
+                           ("/measurements", {"metric": "resting_hr", "value": 60}),
+                           ("/measurements/import", {"csv": "metric,value,measured_at\n"}),
+                           (f"/measurements/{m['id']}/correct", {"value": 61, "reason": "test"}),
+                           ("/sessions", {}),
+                           ("/radiation/readings", {"scope": "PERSONAL", "dose_rate_uGy_h": 18, "crew_member_id": "CM-01"})):
+            assert client.post(path, headers=h, json=body).status_code == 403, (user, path)

@@ -41,14 +41,18 @@ export function SessionProvider({ user, children, onLogout }: { user: User; chil
       ws.onmessage = (m) => {
         const e = JSON.parse(m.data);
         if (e.type === "sync") setSync(e);
-        if (e.type !== "sample") setVersion((v) => v + 1);
+        // High-rate stream events go to subscribers only; everything else invalidates fetched data.
+        if (e.type !== "sample" && e.type !== "cognitive_sample") setVersion((v) => v + 1);
         listeners.current.forEach((fn) => fn(e));
       };
     };
     open();
+    // Client heartbeat: keeps proxies and idle-sleeping hosts (e.g. Render free) from dropping the link.
+    const beat = setInterval(() => ws?.readyState === WebSocket.OPEN && ws.send("ping"), 60_000);
     return () => {
       closed = true;
       clearTimeout(retry);
+      clearInterval(beat);
       ws?.close();
     };
   }, []);

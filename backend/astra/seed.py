@@ -124,6 +124,7 @@ def seed(conn, ground, at: datetime | None = None) -> None:
         devices.sample_dosimetry(conn, ["CM-01", "CM-02"], at - timedelta(hours=h), audit=False)
     protocols.tick(conn, at)
     # Seed history was already on the ground; the demo starts in LOS.
+    conn.execute("UPDATE alerts SET notified_at = created_at WHERE notified_at IS NULL")  # seed history is not news
     sync.push(conn, ground)
     db.set_setting(conn, "ground_link", "LOS")
 

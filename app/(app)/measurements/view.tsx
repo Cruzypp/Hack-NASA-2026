@@ -2,13 +2,14 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { CircleCheck, FileUp, History, Lightbulb, PenLine, ScanSearch, Radiation } from "lucide-react";
+import { CircleCheck, FileUp, FlaskConical, History, Lightbulb, PenLine, ScanSearch, Radiation } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Measurement } from "@/lib/api";
 import { useData, useSession } from "@/lib/session";
 import { EmptyState, PageHeader, StatusBadge } from "@/components/astra";
 import { MeasurementTable } from "@/components/tables";
 import { RadiationPanel } from "@/components/radiation-panel";
+import { LabsPanel } from "@/components/labs-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -37,7 +38,8 @@ function Measurements() {
   const history = useData<Measurement[]>(`/measurements?crew_member_id=${crew}&include_superseded=true`);
   const [result, setResult] = useState<Result | null>(null);
   const [shown, setShown] = useState(25);
-  const own = user.crewMemberId === crew;
+  // Only the crew member records their own data; medical accounts consult read-only.
+  const own = user.role === "ASTRONAUT" && user.crewMemberId === crew;
 
   return (
     <>
@@ -53,12 +55,13 @@ function Measurements() {
             <CardContent>{result ? <Assessment r={result} /> : <EmptyState icon={ScanSearch}>Record a value to see how it compares with the personal baseline.</EmptyState>}</CardContent>
           </Card>
         </div>
-      ) : <p className="text-sm text-muted-foreground">Viewing {crew}. Manual entry is done by the crew member; you can correct values below.</p>}
+      ) : <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Read-only consultation of {crew}. Values are recorded by the crew member; medical accounts cannot add, correct or simulate data.</p>}
 
       <Tabs defaultValue={params.get("tab") ?? "history"}>
         <TabsList>
           <TabsTrigger value="history"><History />History</TabsTrigger>
           <TabsTrigger value="radiation"><Radiation />Radiation</TabsTrigger>
+          <TabsTrigger value="labs"><FlaskConical />Labs</TabsTrigger>
           {own && <TabsTrigger value="import"><FileUp />Import</TabsTrigger>}
         </TabsList>
         <TabsContent value="history" className="mt-4">
@@ -66,7 +69,7 @@ function Measurements() {
             <CardHeader><CardTitle>History · {crew}</CardTitle><CardDescription>Corrections never overwrite: the original stays visible as superseded.</CardDescription></CardHeader>
             <CardContent>
               <MeasurementTable rows={(history.data ?? []).slice(0, shown)}
-                actions={(m) => !m.superseded && (own || user.role !== "ASTRONAUT") ? <CorrectDialog m={m} /> : null} />
+                actions={(m) => !m.superseded && own ? <CorrectDialog m={m} /> : null} />
               {(history.data?.length ?? 0) > shown && (
                 <div className="mt-3 flex justify-center">
                   <Button variant="outline" size="sm" onClick={() => setShown((n) => n + 25)}>Show more · {history.data!.length - shown} older</Button>
@@ -76,6 +79,7 @@ function Measurements() {
           </Card>
         </TabsContent>
         <TabsContent value="radiation" className="mt-4"><RadiationPanel /></TabsContent>
+        <TabsContent value="labs" className="mt-4"><LabsPanel crew={crew} /></TabsContent>
         {own && <TabsContent value="import" className="mt-4"><Import /></TabsContent>}
       </Tabs>
     </>

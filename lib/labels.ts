@@ -4,6 +4,8 @@ const METRICS: Record<string, string> = {
   resting_hr: "Resting heart rate", heart_rate: "Heart rate", systolic_bp: "Systolic blood pressure",
   diastolic_bp: "Diastolic blood pressure", body_temp: "Body temperature", body_mass: "Body mass",
   sleep_hours: "Sleep duration", rpe: "Perceived exertion",
+  cbc_hemoglobin: "Hemoglobin", cbc_hematocrit: "Hematocrit", cbc_wbc: "White blood cells", cbc_platelets: "Platelets",
+  cmp_glucose: "Glucose", cmp_creatinine: "Creatinine", cmp_sodium: "Sodium", cmp_potassium: "Potassium", cmp_albumin: "Albumin",
 };
 
 const FACTORS: Record<string, string> = {

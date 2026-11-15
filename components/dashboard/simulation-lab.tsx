@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Activity, BrainCircuit, Moon, Radiation } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Task } from "@/lib/api";
-import type { FlightPlayback } from "@/lib/cognitive-load";
+import { useCognitiveLoad } from "@/lib/cognitive-load";
 import { useData, useSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,12 +34,11 @@ const RADIATION_SCOPE = [
   ["PERSONAL", "Personal · CAD"],
   ["AREA", "Area · REM/HERA"],
 ] as const;
-const COGNITIVE_LOAD = [["FLIGHT", "Flight playback"]] as const;
+const COGNITIVE_LOAD = [["FLIGHT", "LOFT launch window · 120 s"]] as const;
 
-export function SimulationLab({ playback }: { playback: FlightPlayback }) {
+export function SimulationLab() {
   const { crew, user, refresh } = useSession();
-  const { current, data } = playback;
-  const alertState = useRef(false);
+  const cognitive = useCognitiveLoad(crew);
   // The bio-monitor is worn by the signed-in crew member, so exercise sessions are always their own.
   const own = user.crewMemberId === crew;
   const tasks = useData<Task[]>(`/tasks?crew_member_id=${crew}`);
@@ -48,30 +47,6 @@ export function SimulationLab({ playback }: { playback: FlightPlayback }) {
   const [radiation, setRadiation] = useState<(typeof RADIATION)[number][0]>("NORMAL");
   const [radiationScope, setRadiationScope] = useState<(typeof RADIATION_SCOPE)[number][0]>("PERSONAL");
   const [busy, setBusy] = useState<string | null>(null);
-
-  useEffect(() => {
-    const sample = current;
-    if (!sample?.alerta_activa) {
-      alertState.current = false;
-      return;
-    }
-    if (alertState.current || !data) return;
-    alertState.current = true;
-    api("/demo/cognitive-load", {
-      body: {
-        crew_member_id: crew,
-        phase: sample.phase,
-        cognitive_load: sample.cognitive_load,
-        z: sample.z,
-        baseline: data.baseline,
-      },
-    }).then(() => {
-      toast.success("Cognitive-load alert recorded");
-      refresh();
-    }).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Unable to record cognitive-load alert");
-    });
-  }, [crew, current, data, refresh]);
 
   async function run(kind: string, action: () => Promise<unknown>, success: string) {
     setBusy(kind);
@@ -97,14 +72,14 @@ export function SimulationLab({ playback }: { playback: FlightPlayback }) {
           onChange={(value) => setRadiation(value as typeof radiation)} onSecondaryChange={(value) => setRadiationScope(value as typeof radiationScope)}
           onRun={() => run("radiation", () => api("/demo/radiation", { body: { scenario: radiation, scope: radiationScope, crew_member_id: crew } }), "Radiation reading recorded")} />
         <div>
-          <SimulationControl icon={BrainCircuit} label="Launch / Cognitive Load" value="FLIGHT" options={COGNITIVE_LOAD} busy={busy === "cognitive-load" || playback.loading || !playback.data}
-            onChange={() => undefined} onRun={() => run("cognitive-load", async () => playback.start(), "Cognitive-load playback started")} />
+          <SimulationControl icon={BrainCircuit} label="Launch / Cognitive Load" value="FLIGHT" options={COGNITIVE_LOAD} busy={busy === "cognitive-load" || cognitive.running}
+            onChange={() => undefined} onRun={() => run("cognitive-load", cognitive.start, "Cognitive-load playback started")} />
           <div className="mt-2 px-1">
             <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
-              <span>{playback.current?.phase ?? "standby"}</span>
-              <span>{Math.round(playback.current?.cognitive_load ?? 0)}%</span>
+              <span>{cognitive.running ? cognitive.current?.phase ?? "starting" : "standby"}</span>
+              <span>{cognitive.progress ? `${Math.round(cognitive.current?.cognitive_load ?? 0)}% · ${cognitive.progress.index}/${cognitive.progress.total}` : `${cognitive.overview?.sessions.length ?? 0} stored`}</span>
             </div>
-            <Progress value={playback.current?.cognitive_load ?? 0} className="mt-1 h-1.5" aria-label="Cognitive load" />
+            <Progress value={cognitive.progress ? (cognitive.progress.index / cognitive.progress.total) * 100 : 0} className="mt-1 h-1.5" aria-label="Playback progress" />
           </div>
         </div>
       </CardContent>

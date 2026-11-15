@@ -29,6 +29,10 @@ function describe(i: Item): { title: string; meta?: string; badge?: string } {
   switch (i.kind) {
     case "measurement": return { title: `${metricLabel(d.metric)} · ${d.value} ${d.unit}`, meta: `${humanize(d.source)}${d.correction_reason ? ` · corrected: ${d.correction_reason}` : ""}`, badge: d.superseded ? "SUPERSEDED" : d.quality };
     case "session": {
+      if (d.kind === "COGNITIVE_LOAD") {
+        const c = d.summary as { peak_load?: number; peak_phase?: string; alert_s?: number } | null;
+        return { title: "Cognitive-load playback (LOFT)", meta: `peak ${c?.peak_load ?? "—"}% · ${c?.peak_phase ?? "—"} · alert ${c?.alert_s ?? 0} s`, badge: d.status };
+      }
       const s = d.summary as { valid_minutes?: number; hr_mean?: number } | null;
       return { title: "Exercise session", meta: `${s?.valid_minutes ?? "—"} valid min · mean HR ${s?.hr_mean ?? "—"}`, badge: d.status };
     }

@@ -1,15 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { BellRing, BookText, CalendarClock, ClipboardCheck, Dumbbell, Radiation, ScanSearch } from "lucide-react";
 import { fmtDate, type LogEntry, type Measurement, type RadiationBrief, type ReviewReport } from "@/lib/api";
 import { useData } from "@/lib/session";
 import { humanize } from "@/lib/labels";
 import { EmptyState, ErrorAlert, PageSkeleton, StatusBadge, TaskIcon } from "@/components/astra";
 import { BodyCompositionBrief } from "@/components/body/body-composition";
+import { CognitiveLoadPanel } from "@/components/cognitive-load-panel";
 import { RunReview } from "@/components/crew/reviews";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +52,6 @@ export function StatusPanel({ crew }: { crew: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><CalendarClock className="size-4 text-primary" />Next 24 hours</CardTitle>
-            <CardAction><Button size="sm" variant="ghost" asChild><Link href="/schedule">Schedule</Link></Button></CardAction>
           </CardHeader>
           <CardContent>
             {data.upcoming.length ? (
@@ -74,7 +72,6 @@ export function StatusPanel({ crew }: { crew: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><BellRing className="size-4 text-warning-strong" />Alerts & follow-ups</CardTitle>
-            <CardAction><Button size="sm" variant="ghost" asChild><Link href="/alerts">Open</Link></Button></CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             {!data.open_alerts.length && !data.follow_ups.length && <EmptyState icon={BellRing}>Nothing open</EmptyState>}
@@ -151,7 +148,8 @@ export function StatusPanel({ crew }: { crew: string }) {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <BodyCompositionBrief crew={crew} />
-        <Card className="lg:col-span-2">
+        <CognitiveLoadPanel crew={crew} compact />
+        <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><BookText className="size-4 text-primary" />Recent logbook entries</CardTitle>
         </CardHeader>

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { BellRing, CalendarCheck, CloudUpload, Cpu, Moon, HeartPulse, Radiation, Scale, X } from "lucide-react";
 import { metricLabel } from "@/lib/labels";
-import { useFlightPlayback } from "@/lib/cognitive-load";
 import { toast } from "sonner";
 import { api, fmtDate, fmtTime, type Alert, type Measurement, type RadiationBrief, type SyncState, type Task } from "@/lib/api";
 import { useData, useSession } from "@/lib/session";
@@ -14,6 +13,7 @@ import { ScheduleDayList } from "@/components/schedule/schedule-day-list";
 import { SimulationLab } from "@/components/dashboard/simulation-lab";
 import { LiveTelemetry } from "@/components/dashboard/live-telemetry";
 import { BodyCompositionBrief } from "@/components/body/body-composition";
+import { CognitiveLoadPanel } from "@/components/cognitive-load-panel";
 import { Alert as UiAlert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,7 +53,6 @@ const greeting = (iso: string) => { const h = new Date(iso).getUTCHours(); retur
 
 function Health({ d }: { d: Dash }) {
   const { refresh } = useSession();
-  const cognitivePlayback = useFlightPlayback("/samples/muestra_vuelo.json");
   const byTime = (a: Task, b: Task) => a.due_at.localeCompare(b.due_at);
   const today = d.tasks?.filter((t) => t.due_at.slice(0, 10) === d.now.slice(0, 10)).sort(byTime) ?? [];
   const carried = d.tasks?.filter((t) => t.due_at.slice(0, 10) !== d.now.slice(0, 10)).sort(byTime) ?? [];
@@ -94,9 +93,9 @@ function Health({ d }: { d: Dash }) {
         </UiAlert>
       )}
 
-      <SimulationLab playback={cognitivePlayback} />
+      <SimulationLab />
       <LiveTelemetry key={d.crewMemberId} crew={d.crewMemberId!} initialPersonal={d.radiation?.personal.series ?? []}
-        initialArea={d.radiation?.area.series ?? []} initialSleep={d.trends?.sleep_hours?.points ?? []} cognitivePlayback={cognitivePlayback} />
+        initialArea={d.radiation?.area.series ?? []} initialSleep={d.trends?.sleep_hours?.points ?? []} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -126,6 +125,7 @@ function Health({ d }: { d: Dash }) {
             </CardContent>
           </Card>
           {d.crewMemberId && <BodyCompositionBrief crew={d.crewMemberId} />}
+          {d.crewMemberId && <CognitiveLoadPanel crew={d.crewMemberId} compact />}
           <Card>
             <CardHeader><CardTitle>Sensors</CardTitle></CardHeader>
             <CardContent><DeviceList devices={d.devices.filter((x) => x.integration === "SIMULATED")} /></CardContent>

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Activity, BellRing, CalendarClock, ChevronsUpDown, Dumbbell, PersonStanding, FileHeart, HeartPulse, LayoutDashboard, LogOut, Orbit, RadioTower, Satellite, Stethoscope } from "lucide-react";
 import { api, isMedical, session, type User } from "@/lib/api";
 import { SessionProvider, useData, useSession } from "@/lib/session";
+import { AlertNotifier } from "@/components/alert-notifier";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -38,14 +39,25 @@ const NAV = [
   ] },
 ];
 
+// Medical accounts: their clinical dashboard plus read-only consultation of the crew member's data.
+const MEDICAL_PAGES = ["/crew", "/measurements", "/exercise", "/body"];
+const MEDICAL_NAV = [{ group: "Clinical", items: MEDICAL_PAGES.map((href) => NAV.flatMap((g) => g.items).find((n) => n.href === href)!) }];
+export const homeFor = (u: User) => (isMedical(u.role) ? "/crew" : "/dashboard");
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const path = usePathname();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     if (!session.token()) return router.replace("/");
     api<User>("/me").then(setUser).catch(() => { session.clear(); router.replace("/"); });
   }, [router]);
+
+  const blocked = !!user && isMedical(user.role) && !MEDICAL_PAGES.includes(path);
+  useEffect(() => {
+    if (blocked) router.replace("/crew");
+  }, [blocked, router]);
 
   if (!user) {
     return (
@@ -55,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
   const logout = () => { session.clear(); router.replace("/"); };
+  if (blocked) return null;
   return (
     <SessionProvider user={user} onLogout={logout}>
       <SidebarProvider>
@@ -78,7 +91,7 @@ function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link href="/dashboard">
+              <Link href={homeFor(user)}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Satellite className="size-4" /></div>
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="font-mono text-xs font-semibold tracking-[0.25em] text-primary">ASTRA</span>
@@ -90,8 +103,9 @@ function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        {NAV.map((g) => {
-          const items = g.items.filter((n) => (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) && (!("medical" in n) || isMedical(user.role)));
+        {(isMedical(user.role) ? MEDICAL_NAV : NAV).map((g) => {
+          const items = isMedical(user.role) ? g.items
+            : g.items.filter((n) => (user.role !== "MISSION_OPERATOR" || ("ops" in n && n.ops)) && !("medical" in n));
           if (!items.length) return null;
           return (
             <SidebarGroup key={g.group}>
@@ -182,6 +196,7 @@ function TopBar() {
           </Tooltip>
         )}
       </div>
+      <AlertNotifier />
       {isMedical(user.role) && (
         <Select value={crew} onValueChange={setCrew}>
           <SelectTrigger size="sm" className="w-36 font-mono text-xs" aria-label="Crew member in view"><SelectValue /></SelectTrigger>

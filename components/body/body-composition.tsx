@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BellRing, FlaskConical, Info, Lightbulb, PersonStanding, ScanLine, UserRound } from "lucide-react";
+import { BellRing, FlaskConical, Info, Lightbulb, PersonStanding, ScanLine } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { api, fmtDate, isMedical, type BodyAssessment, type BodyComposition, type BodyFinding } from "@/lib/api";
@@ -34,6 +34,7 @@ export function LevelBadge({ value }: { value: string }) {
 /** Full body-composition workspace: generator, segmental map, trends, findings and history. */
 export function BodyCompositionPanel({ crew }: { crew: string }) {
   const { data, error } = useData<BodyComposition>(`/body-composition/${crew}`);
+  const { user } = useSession();
   const [selected, setSelected] = useState<string | null>(null);
   if (error) return <ErrorAlert error={error} />;
   if (!data) return <PageSkeleton />;
@@ -41,7 +42,8 @@ export function BodyCompositionPanel({ crew }: { crew: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Generator crew={crew} scenarios={data.scenarios} />
+      {user.role === "ASTRONAUT" ? <Generator crew={crew} scenarios={data.scenarios} />
+        : <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Read-only consultation of {crew}. Assessments are recorded by the crew member.</p>}
       {!a ? <EmptyState icon={ScanLine}>No body composition assessments yet</EmptyState> : (
         <>
           <Summary a={a} />
@@ -112,6 +114,7 @@ function Generator({ crew, scenarios }: { crew: string; scenarios: Record<string
 }
 
 function Summary({ a }: { a: BodyAssessment }) {
+  const { user } = useSession();
   const d = a.evaluation.deltas;
   const v = a.values;
   const tiles: [string, number, string, string | undefined, boolean?][] = [
@@ -130,7 +133,7 @@ function Summary({ a }: { a: BodyAssessment }) {
           <LevelBadge value={a.evaluation.status} /><StatusBadge value={a.quality} /><StatusBadge value={a.source} tone="neutral" />
         </CardTitle>
         <CardDescription>{fmtDate(a.measured_at)} · {a.evaluation.summary}</CardDescription>
-        {a.alert_id && <CardAction><Button size="sm" variant="outline" asChild><Link href="/alerts"><BellRing />Alert</Link></Button></CardAction>}
+        {a.alert_id && !isMedical(user.role) && <CardAction><Button size="sm" variant="outline" asChild><Link href="/alerts"><BellRing />Alert</Link></Button></CardAction>}
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         {tiles.map(([k, val, u, delta, warn]) => (
@@ -145,29 +148,67 @@ function Summary({ a }: { a: BodyAssessment }) {
   );
 }
 
+// Front-view silhouette (viewBox 200×360). Right-side limbs are drawn on the viewer's left
+// (anatomical view) and mirrored for the left side.
+const BODY = {
+  trunk: "M70 62 Q100 54 130 62 Q141 66 140 80 L135 118 Q129 134 129 146 L133 172 Q131 181 118 183 L82 183 Q69 181 67 172 L71 146 Q71 134 65 118 L60 80 Q59 66 70 62 Z",
+  arm: "M56 68 Q44 71 41 88 L35 140 L27 190 Q25 202 33 204 Q41 205 43 195 L52 145 L58 112 L60 86 Q61 72 56 68 Z",
+  leg: "M70 187 L98 187 Q101 189 99 200 L95 262 L94 330 Q95 344 84 346 L70 346 Q62 344 69 334 L72 262 L67 204 Q66 191 70 187 Z",
+};
+const LEVEL_FILL: Record<string, string> = {
+  WITHIN_REFERENCE: "fill-success/35", WATCH: "fill-primary/45", REVIEW: "fill-warning/65", ACTION: "fill-destructive/65",
+};
+const LEVEL_WORD: Record<string, string> = { WITHIN_REFERENCE: "Normal", WATCH: "Watch", REVIEW: "Review", ACTION: "Action" };
+
 function SegmentMap({ a, names, thresholds }: { a: BodyAssessment; names: Record<string, string>; thresholds: Record<string, number> }) {
   const seg = a.evaluation.segments;
-  // Anatomical view: the subject's right side is on the viewer's left.
-  const cell = (k: string, area: string) => {
-    const s = seg[k];
+  const fill = (k: string) => (seg[k] ? LEVEL_FILL[seg[k].level] : "fill-muted");
+  const tip = (k: string) => `${names[k]}: ${a.segments[k].toFixed(2)} kg${seg[k] ? ` (${signed(seg[k].pct)}% vs reference, ${LEVEL_WORD[seg[k].level]})` : ""}`;
+  const part = (k: string, d: string, mirror = false) => (
+    <path d={d} transform={mirror ? "translate(200 0) scale(-1 1)" : undefined}
+      className={cn("stroke-foreground/25 transition-colors", fill(k))} strokeWidth={1.2}><title>{tip(k)}</title></path>
+  );
+  const label = (k: string, align: "left" | "right") => {
+    const x = seg[k];
     return (
-      <div key={k} style={{ gridArea: area }} className={cn("flex flex-col justify-center rounded-lg border px-2 py-2 text-center", s ? LEVEL_CLASS[s.level] : "border-border bg-muted/40")}>
-        <span className="text-[10px] uppercase tracking-wider opacity-80">{names[k]}</span>
-        <span className="font-mono text-sm font-semibold tabular-nums text-foreground">{a.segments[k].toFixed(2)} kg</span>
-        <span className="font-mono text-xs tabular-nums">{s ? `${signed(s.pct)}%` : "—"}</span>
+      <div className={cn("flex flex-col gap-0.5 font-mono tabular-nums", align === "right" && "items-end text-right")}>
+        <span className="font-sans text-[10px] uppercase tracking-wider text-muted-foreground">{names[k]}</span>
+        <span className="text-sm font-semibold">{a.segments[k].toFixed(2)} kg</span>
+        <span className="border-t border-dashed pt-0.5 text-xs">{x ? `${signed(x.pct)}%` : "—"}</span>
+        {x && <span className={cn("w-fit rounded border px-1.5 text-[10px] font-sans", LEVEL_CLASS[x.level])}>{LEVEL_WORD[x.level]}</span>}
       </div>
     );
   };
   return (
     <div className="flex flex-col gap-3">
-      <div className="mx-auto grid w-full max-w-xs gap-2" style={{ gridTemplateAreas: `". head ." "ra trunk la" "ra trunk la" "rl . ll" "rl . ll"`, gridTemplateColumns: "1fr 1.3fr 1fr" }}>
-        <div style={{ gridArea: "head" }} className="mx-auto flex size-10 items-center justify-center rounded-full border bg-muted/40"><UserRound className="size-4 text-muted-foreground" /></div>
-        {cell("right_arm", "ra")}{cell("trunk", "trunk")}{cell("left_arm", "la")}{cell("right_leg", "rl")}{cell("left_leg", "ll")}
+      <div className="relative mx-auto grid w-full max-w-sm grid-cols-[1fr_auto_1fr] grid-rows-2 gap-x-2 rounded-lg bg-muted/30 p-3">
+        <div className="pointer-events-none absolute inset-x-3 top-1/2 border-t border-dashed border-border" aria-hidden />
+        <div className="row-start-1 self-center">{label("right_arm", "left")}</div>
+        <div className="row-start-2 self-center">{label("right_leg", "left")}</div>
+        <div className="relative col-start-2 row-span-2 row-start-1">
+          <svg viewBox="0 0 200 360" className="h-72 w-auto" role="img"
+            aria-label={`Segmental lean mass: ${["right_arm", "left_arm", "trunk", "right_leg", "left_leg"].map(tip).join("; ")}`}>
+            <circle cx={100} cy={32} r={22} className="fill-muted stroke-foreground/25" strokeWidth={1.2} />
+            <rect x={91} y={51} width={18} height={12} rx={4} className="fill-muted stroke-foreground/25" strokeWidth={1.2} />
+            {part("trunk", BODY.trunk)}
+            {part("right_arm", BODY.arm)}{part("left_arm", BODY.arm, true)}
+            {part("right_leg", BODY.leg)}{part("left_leg", BODY.leg, true)}
+          </svg>
+          <div className="pointer-events-none absolute inset-x-0 top-[25%] flex flex-col items-center font-mono tabular-nums">
+            <span className="rounded bg-background/80 px-1.5 text-xs font-semibold">{a.segments.trunk.toFixed(1)} kg</span>
+            <span className="rounded bg-background/80 px-1.5 text-[11px]">{seg.trunk ? `${signed(seg.trunk.pct)}%` : "—"}</span>
+          </div>
+          <span className="absolute bottom-0 left-0 font-sans text-[10px] uppercase text-muted-foreground">R</span>
+          <span className="absolute bottom-0 right-0 font-sans text-[10px] uppercase text-muted-foreground">L</span>
+        </div>
+        <div className="col-start-3 row-start-1 self-center">{label("left_arm", "right")}</div>
+        <div className="col-start-3 row-start-2 self-center">{label("left_leg", "right")}</div>
       </div>
       {a.evaluation.leg_asymmetry_pct && (
         <p className="text-center font-mono text-xs text-muted-foreground">Leg asymmetry {a.evaluation.leg_asymmetry_pct.value}% · preflight {a.evaluation.leg_asymmetry_pct.reference}%</p>
       )}
       <p className="flex flex-wrap justify-center gap-1.5">
+        <span className={cn("rounded border px-1.5 py-0.5 font-mono text-[10px]", LEVEL_CLASS.WITHIN_REFERENCE)}>NORMAL</span>
         {Object.entries(thresholds).map(([lvl, t]) => <span key={lvl} className={cn("rounded border px-1.5 py-0.5 font-mono text-[10px]", LEVEL_CLASS[lvl])}>{lvl} ≥ −{t}%</span>)}
       </p>
     </div>

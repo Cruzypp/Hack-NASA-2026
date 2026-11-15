@@ -32,8 +32,8 @@ export function RadiationPanel() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-5">
-      <EntryForm className="lg:col-span-2" crew={crew} canPersonal={canPersonal} lastCumulative={latest?.cumulative_uGy ?? null} />
-      <Card className="lg:col-span-3">
+      {user.role === "ASTRONAUT" && <EntryForm className="lg:col-span-2" crew={crew} canPersonal={canPersonal} lastCumulative={latest?.cumulative_uGy ?? null} />}
+      <Card className={user.role === "ASTRONAUT" ? "lg:col-span-3" : "lg:col-span-5"}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Radiation className="size-4 text-warning-strong" />Personal dosimetry · {crew}</CardTitle>
           <CardDescription>

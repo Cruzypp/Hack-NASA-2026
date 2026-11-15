@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarPlus, ChevronLeft, ChevronRight, History, PencilLine, Plus, Repeat, Square } from "lucide-react";
+import { BellRing, CalendarPlus, ChevronLeft, ChevronRight, History, PencilLine, Plus, Repeat, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, fmtDate, type PlanItem, type Task } from "@/lib/api";
 import { useData, useSession } from "@/lib/session";
@@ -169,7 +169,8 @@ function WeekCalendar({ crew, onAdd, onOpen, canPlan }: { crew: string; onAdd: (
                             <span className="font-mono text-muted-foreground">{t.due_at.slice(11, 16)}</span>{" "}
                             <span className="font-medium">{t.title}</span>
                           </span>
-                          {t.schedule_type === "CLINICIAN_ORDERED" && <span className="size-1.5 shrink-0 rounded-full bg-warning" title="One-off" />}
+                          {t.source_alert_id ? <BellRing className="mt-px size-3 shrink-0 text-warning-strong" aria-label="Review of alert findings" />
+                            : t.schedule_type === "CLINICIAN_ORDERED" && <span className="size-1.5 shrink-0 rounded-full bg-warning" title="One-off" />}
                         </button>
                       </li>
                     );
@@ -182,6 +183,7 @@ function WeekCalendar({ crew, onAdd, onOpen, canPlan }: { crew: string; onAdd: (
         </div>
         <p className="mt-3 flex items-center gap-4 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-warning" />One-off</span>
+          <span className="flex items-center gap-1.5"><BellRing className="size-3 text-warning-strong" />CMO review of alert findings (one per crew member, at the daily review time)</span>
           <span className="flex items-center gap-1.5"><Repeat className="size-3" />Others repeat from the care plan</span>
         </p>
       </CardContent>

@@ -29,7 +29,7 @@ const KINDS: { value: Kind; label: string }[] = [
   { value: "RADIATION_READING", label: "Radiation reading" },
   { value: "AUTOMATED_REVIEW", label: "Automated deviation review" },
   { value: "TELEMETRY_SESSION", label: "Exercise session" },
-  { value: "VERIFICATION", label: "Clinical check (CMO / flight surgeon)" },
+  { value: "VERIFICATION", label: "CMO review / clinical check" },
   { value: "ACTIVITY", label: "Recreation" },
 ];
 const MEASURE_METRICS = ["resting_hr", "systolic_bp", "diastolic_bp", "body_temp", "body_mass", "sleep_hours"];

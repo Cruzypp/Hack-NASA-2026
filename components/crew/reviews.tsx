@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { ScanSearch } from "lucide-react";
 import { toast } from "sonner";
@@ -104,7 +103,7 @@ function ReportCard({ r }: { r: ReviewReport }) {
           </ul>
         )}
         {!!s.missing_days.length && <p className="text-xs text-warning-strong">Days without data: {s.missing_days.join(", ")}</p>}
-        {s.alert_id && <p className="text-xs"><Link href="/alerts" className="text-primary underline-offset-4 hover:underline">Alert and CMO review created →</Link></p>}
+        {s.alert_id && <p className="text-xs"><span className="text-primary">Alert and CMO review created.</span></p>}
       </CardContent>
     </Card>
   );

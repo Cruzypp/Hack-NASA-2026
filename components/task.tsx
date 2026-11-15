@@ -55,7 +55,7 @@ export function TaskRow({ task, showDate, hideStatus, hideTechnical, hideNote, h
             {last.reasons?.join("; ")}
           </p>
         )}
-        {!hideNote && task.note && <p className="text-xs text-muted-foreground">{task.note}</p>}
+        {!hideNote && task.note && <p className="whitespace-pre-line text-xs text-muted-foreground">{task.note}</p>}
       </div>
       {open && (
         <div className="flex shrink-0 items-start gap-2">
@@ -147,7 +147,7 @@ function VerifyDialog({ task }: { task: Task }) {
               {task.source_alert_id && " The linked alert will be resolved."}
             </DialogDescription>
           </DialogHeader>
-          {task.note && <p className="rounded-md bg-muted/50 p-3 text-sm">{task.note}</p>}
+          {task.note && <p className="whitespace-pre-line rounded-md bg-muted/50 p-3 text-sm">{task.note}</p>}
           <div className="flex flex-col gap-2">
             <Label htmlFor={`note-${task.id}`}>Verification note</Label>
             <Textarea id={`note-${task.id}`} required minLength={3} rows={4} value={note} onChange={(e) => setNote(e.target.value)}

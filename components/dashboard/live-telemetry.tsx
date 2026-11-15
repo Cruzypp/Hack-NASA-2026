@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BrainCircuit, Radio, Radiation } from "lucide-react";
 import { useSession } from "@/lib/session";
-import type { FlightPlayback } from "@/lib/cognitive-load";
+import { useCognitiveLoad } from "@/lib/cognitive-load";
 import { EmptyState } from "@/components/astra";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -12,9 +12,10 @@ type Point = { time: string; value: number };
 type HistoricalPoint = { measured_at: string; value: number };
 
 /** Seeded from stored history; mount with `key={crew}` so switching crew member starts fresh. */
-export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initialSleep = [], cognitivePlayback }: {
-  crew: string; initialPersonal: HistoricalPoint[]; initialArea?: HistoricalPoint[]; initialSleep?: HistoricalPoint[]; cognitivePlayback: FlightPlayback;
+export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initialSleep = [] }: {
+  crew: string; initialPersonal: HistoricalPoint[]; initialArea?: HistoricalPoint[]; initialSleep?: HistoricalPoint[];
 }) {
+  const cognitive = useCognitiveLoad(crew);
   const { subscribe } = useSession();
   const [heartRate, setHeartRate] = useState<Point[]>([]);
   const [personal, setPersonal] = useState<Point[]>(initialPersonal.slice(-24).map((point) => ({
@@ -26,10 +27,11 @@ export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initial
   const [sleep, setSleep] = useState<Point[]>(initialSleep.slice(-24).map((point) => ({
     time: point.measured_at.slice(5, 10), value: point.value,
   })));
-  const cognitiveLoad = useMemo(() => cognitivePlayback.trace.map((sample) => ({
-    time: `${sample.t.toFixed(1)}s`,
-    value: sample.cognitive_load,
-  })), [cognitivePlayback.trace]);
+  // Live stream while a playback runs; otherwise the tail of the last stored session.
+  const cognitiveLoad = useMemo(() => cognitive.live.length
+    ? cognitive.live.slice(-48).map((s) => ({ time: `${s.t.toFixed(1)}s`, value: s.cognitive_load }))
+    : (cognitive.overview?.latest?.trace ?? []).slice(-48).map((s) => ({ time: s.at.slice(11, 19), value: s.cognitive_load })),
+  [cognitive.live, cognitive.overview]);
 
   useEffect(() => subscribe((event) => {
     if (event.crew_member_id && event.crew_member_id !== crew && event.type !== "radiation") return;
@@ -64,7 +66,7 @@ export function LiveTelemetry({ crew, initialPersonal, initialArea = [], initial
         <TelemetryChart icon={Activity} title="Sleep duration" unit="h" color="var(--chart-3)" points={sleep} empty="Run a sleep simulation to add a sleep result." />
         <TelemetryChart icon={Radiation} title="Personal dose rate" unit="µGy/h" color="var(--warning)" points={personal} empty="No personal radiation stream yet." />
         <TelemetryChart icon={Radiation} title="Area dose rate" unit="µGy/h" color="var(--chart-4)" points={area} empty="No area monitor readings yet." />
-        <TelemetryChart icon={BrainCircuit} title="Cognitive load" unit="%" color="var(--chart-2)" points={cognitiveLoad} empty="Run the cognitive-load playback to stream load." />
+        <TelemetryChart icon={BrainCircuit} title="Cognitive load" unit="%" color="var(--chart-2)" points={cognitiveLoad} empty="Run the LOFT cognitive-load playback to stream load." />
       </CardContent>
     </Card>
   );

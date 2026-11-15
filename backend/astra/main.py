@@ -18,12 +18,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import body as bodycomp, clinical, db, devices, intelligence, protocols, seed, sync
+from . import body as bodycomp, clinical, cognitive, labs, db, devices, intelligence, notify, protocols, seed, sync
 from .db import Actor, SYSTEM, iso, parse
 
 MEDICAL_ROLES = {"CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"}
 REMINDER_RANK = {"DUE": 0, "OVERDUE": 1, "ESCALATION": 2}
 PLAYBACK_S = float(os.environ.get("ASTRA_PLAYBACK_S", "0.05"))
+# Multiplier on the flight recording's own timing (1 = real time, 0 = as fast as possible).
+COGNITIVE_TIMESCALE = float(os.environ.get("ASTRA_COGNITIVE_TIMESCALE", "1"))
 
 
 # ------------------------------------------------------------------ models
@@ -73,11 +75,7 @@ class BodyDemoIn(BaseModel):
     crew_member_id: str | None = None
 
 
-class CognitiveLoadDemoIn(BaseModel):
-    phase: str = Field(min_length=1, max_length=32)
-    cognitive_load: float = Field(ge=0, le=100)
-    z: dict[str, float]
-    baseline: dict[str, dict[str, float]]
+class CognitiveSessionIn(BaseModel):
     crew_member_id: str | None = None
 
 
@@ -99,6 +97,11 @@ class RpeIn(BaseModel):
 class VerifyIn(BaseModel):
     note: str = Field(min_length=3, max_length=2000)
     resolve_alert: bool = True
+
+
+class FollowUpIn(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+    priority: Literal["ROUTINE", "HIGH", "CRITICAL"] = "HIGH"
 
 
 class ResolveIn(BaseModel):
@@ -134,6 +137,13 @@ class RadiationIn(BaseModel):
     crew_member_id: str | None = None
     measured_at: datetime | None = None
     note: str | None = Field(default=None, max_length=500)
+
+
+class DeviceReadingIn(BaseModel):
+    crew_member_id: str = Field(max_length=32)
+    metric: str = Field(max_length=32)
+    value: float
+    measured_at: datetime | None = None
 
 
 class LinkIn(BaseModel):
@@ -207,6 +217,9 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
     ground = sync.connect_ground(ground_path)
     seed.seed(conn, ground)
     bodycomp.seed(conn)
+    # A playback cannot survive a restart; never leave it blocking new sessions.
+    conn.execute("UPDATE sensor_sessions SET status = 'FAULTED', ended_at = ? WHERE kind = 'COGNITIVE_LOAD' AND status = 'RUNNING'",
+                 (iso(db.now()),))
     hub = Hub()
     running: dict[str, asyncio.Task] = {}
 
@@ -236,17 +249,33 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             await hub.send({"type": "tasks", **counts})
         sync.push(conn, ground)
 
+    async def notify_once():
+        """Push new alerts to consoles and queue/send webhooks. Runs every second."""
+        for a in notify.collect(conn):
+            await hub.send(notify.event(a), a["crew_member_id"], medical=a["category"] == "MEDICAL")
+        if notify.config()["urls"]:
+            await notify.deliver(conn)
+
+    async def notifier():
+        while True:
+            try:
+                await notify_once()
+            except Exception as e:  # a notification problem must never stop the node
+                print("notifier error:", e)
+            await asyncio.sleep(1)
+
     @contextlib.asynccontextmanager
     async def lifespan(app):
-        task = asyncio.create_task(housekeeping()) if background else None
+        tasks = [asyncio.create_task(housekeeping()), asyncio.create_task(notifier())] if background else []
         yield
-        if task:
+        for task in tasks:
             task.cancel()
 
     app = FastAPI(title="ASTRA Health — onboard node", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=os.environ.get("ASTRA_CORS", "http://localhost:3000").split(","),
                        allow_methods=["*"], allow_headers=["*"])
     app.state.conn, app.state.ground, app.state.hub, app.state.step = conn, ground, hub, step
+    app.state.notify_once = notify_once
 
     def crew_ids() -> list[str]:
         return [r["crew_member_id"] for r in db.rows(conn, "SELECT crew_member_id FROM users WHERE crew_member_id IS NOT NULL")]
@@ -265,6 +294,12 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
     def need(actor: Actor, *roles: str):
         if actor.role not in roles:
             raise HTTPException(403, f"Role {actor.role} not permitted")
+
+    def crew_writes(actor: Actor):
+        """Health data is recorded by the crew member themself. Medical accounts are a
+        read-only consultation panel for measurements, exercise/recovery and body composition."""
+        if actor.role != "ASTRONAUT":
+            raise HTTPException(403, "Health data is recorded by the crew member; medical accounts are read-only")
 
     def medical_access(actor: Actor, crew_member_id: str):
         """Health data: the astronaut's own, or medical staff. Never mission ops."""
@@ -453,15 +488,19 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             ref = db.new_id("vrf")
             db.record(conn, actor, "VERIFICATION_RECORDED", "task", task_id, {"ref": ref, "note": body.note})
             res = _evidence(actor, task_id, ref, {"kind": "VERIFICATION", "role": actor.role, "note": body.note})
-            if res["accepted"] and body.resolve_alert and t["source_alert_id"]:
-                _resolve(actor, t["source_alert_id"], f"Verified via task {task_id}: {body.note}")
+            if res["accepted"] and body.resolve_alert:
+                # A consolidated CMO review covers several alerts; resolve each one it lists.
+                for a in db.rows(conn, "SELECT id FROM alerts WHERE (follow_up_task_id = ? OR id = ?) AND status != 'RESOLVED'",
+                                 task_id, t["source_alert_id"]):
+                    _resolve(actor, a["id"], f"Verified via task {task_id}: {body.note}")
         await hub.send({"type": "alerts"}, t["crew_member_id"])
         return res
 
     @app.post("/tasks/{task_id}/dosimeter-check")
     async def dosimeter_check(task_id: str, actor: Actor = Depends(current)):
         t = task_or_404(task_id)
-        if actor.crew_member_id != t["crew_member_id"] and actor.role not in MEDICAL_ROLES:
+        crew_writes(actor)
+        if actor.crew_member_id != t["crew_member_id"]:
             raise HTTPException(403, "Not permitted")
         dev = db.one(conn, "SELECT * FROM devices WHERE id = 'cad-sim'")
         eva = db.one(conn, "SELECT id FROM eva_events WHERE crew_member_id = ? ORDER BY planned_start DESC LIMIT 1",
@@ -498,7 +537,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
 
     @app.post("/demo/sleep")
     async def demo_sleep(body: SleepDemoIn, actor: Actor = Depends(current)):
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew_writes(actor)
         crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
         if not crew:
             raise HTTPException(400, "Sleep simulations require a crew member")
@@ -513,7 +552,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
 
     @app.post("/demo/radiation")
     async def demo_radiation(body: RadiationDemoIn, actor: Actor = Depends(current)):
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew_writes(actor)
         crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
         if body.scope == "PERSONAL" and not crew:
             raise HTTPException(400, "Personal radiation simulations require a crew member")
@@ -530,36 +569,65 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         await hub.send({"type": "radiation", "scenario": body.scenario, "reading": reading}, crew)
         return {"scenario": body.scenario, "reading": reading}
 
-    @app.post("/demo/cognitive-load")
-    async def demo_cognitive_load(body: CognitiveLoadDemoIn, actor: Actor = Depends(current)):
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+    # -------------------------------------------------------------- cognitive load (LOFT playback)
+
+    @app.post("/cognitive/sessions")
+    async def start_cognitive(body: CognitiveSessionIn, actor: Actor = Depends(current)):
+        """Replay the processed LOFT flight window as a sensor session for the crew member in view."""
+        crew_writes(actor)
         crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
-        if not crew:
-            raise HTTPException(400, "Cognitive-load simulations require a crew member")
         _crew_or_404(crew)
-        rule = {"id": "cognitive-iqr-z", "version": "0.1", "threshold_z": 3.0,
-                "provenance": "ASTRA experimental rule; not NASA-specified."}
-        explanation = {
-            "phase": body.phase,
-            "cognitive_load": body.cognitive_load,
-            "z": body.z,
-            "baseline": body.baseline,
-            "rule": rule,
-            "summary": f"Cognitive load alert during {body.phase}: z-score threshold sustained",
-            "recommendation": "Crew Medical Officer review. ASTRA does not diagnose.",
-        }
-        with db.tx(conn):
-            alert_id = protocols.raise_alert(
-                conn, crew, "MEDICAL", "COGNITIVE_LOAD", "REVIEW",
-                "Cognitive load outside experimental baseline", explanation,
-                rule_id=rule["id"], rule_version=rule["version"])
-        await hub.send({"type": "alerts", "kind": "cognitive-load", "alert_id": alert_id}, crew)
-        return {"alert_id": alert_id, "phase": body.phase, "cognitive_load": body.cognitive_load}
+        try:
+            data = cognitive.load()
+            s = cognitive.start(conn, actor, crew)
+        except FileNotFoundError:
+            raise HTTPException(503, "Flight playback file not found; run scripts/procesar_telemetria.py")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        running[s["id"]] = asyncio.create_task(_play_cognitive(actor, s, data))
+        await hub.send({"type": "cognitive_started", "session_id": s["id"], "crew_member_id": crew,
+                        "total": len(data["samples"]), "meta": data["meta"]}, crew)
+        return {**s, "total": len(data["samples"]), "meta": data["meta"]}
+
+    async def _play_cognitive(actor: Actor, s: dict, data: dict):
+        alert_id, active, played = None, False, []
+        prev_t = data["samples"][0]["t"]
+        try:
+            for x in data["samples"]:
+                await asyncio.sleep(max(0.0, x["t"] - prev_t) * COGNITIVE_TIMESCALE)
+                prev_t = x["t"]
+                cognitive.store_sample(conn, s, x)
+                played.append(x)
+                if x["alerta_activa"] and not active and not alert_id:
+                    alert_id = cognitive.raise_alert(conn, s, x, data)
+                    await hub.send({"type": "alerts", "kind": "cognitive-load", "alert_id": alert_id}, s["crew_member_id"])
+                active = x["alerta_activa"]
+                await hub.send({"type": "cognitive_sample", "session_id": s["id"], "crew_member_id": s["crew_member_id"],
+                                "index": len(played), "total": len(data["samples"]), **x}, s["crew_member_id"])
+            result = cognitive.finish(conn, actor, s, cognitive.summarize(played, data, alert_id))
+            await hub.send({"type": "cognitive_finished", "session_id": s["id"], "crew_member_id": s["crew_member_id"],
+                            "summary": result["summary"]}, s["crew_member_id"])
+        finally:
+            running.pop(s["id"], None)
+
+    @app.get("/cognitive/{crew_member_id}")
+    async def cognitive_overview(crew_member_id: str, actor: Actor = Depends(current)):
+        _crew_or_404(crew_member_id)
+        medical_access(actor, crew_member_id)
+        items = cognitive.sessions(conn, crew_member_id)
+        latest = cognitive.detail(conn, items[0]["id"]) if items else None
+        return {"sessions": items, "latest": latest, "rule": cognitive.RULE, "source_note": cognitive.SOURCE_NOTE}
+
+    @app.get("/labs/{crew_member_id}")
+    async def labs_panel(crew_member_id: str, actor: Actor = Depends(current)):
+        _crew_or_404(crew_member_id)
+        medical_access(actor, crew_member_id)
+        return labs.panel(conn, crew_member_id)
 
     @app.post("/demo/body-composition")
     async def demo_body(body: BodyDemoIn, actor: Actor = Depends(current)):
         """Synthetic InBody-type assessment for the crew member in view, evaluated like a real one."""
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew_writes(actor)
         crew = actor.crew_member_id if actor.role == "ASTRONAUT" else (body.crew_member_id or actor.crew_member_id)
         _crew_or_404(crew)
         a = bodycomp.simulate(conn, actor, crew, body.scenario, body.phase, db.now())
@@ -627,7 +695,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
 
     @app.post("/measurements")
     async def add_measurement(body: MeasurementIn, actor: Actor = Depends(current)):
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew_writes(actor)
         crew = actor.crew_member_id
         if not crew:
             raise HTTPException(400, "Measurements are entered for the signed-in crew member")
@@ -642,8 +710,9 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         old = db.one(conn, "SELECT * FROM measurements WHERE id = ?", measurement_id)
         if not old or old["superseded"]:
             raise HTTPException(404, "Measurement not found or already corrected")
-        if not (actor.role in MEDICAL_ROLES or actor.id == old["entered_by"]):
-            raise HTTPException(403, "Only the author or medical staff may correct")
+        crew_writes(actor)
+        if actor.crew_member_id != old["crew_member_id"]:
+            raise HTTPException(403, "Only the crew member may correct their own values")
         m = _store_measurement(actor, old["crew_member_id"], old["metric"], body.value, parse(old["measured_at"]),
                                old["source"], None, supersedes=old, reason=body.reason)
         return {"measurement": m, "assessment": intelligence.assess(conn, m)}
@@ -651,7 +720,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
     @app.post("/measurements/import")
     async def import_csv(body: ImportIn, actor: Actor = Depends(current)):
         """CSV columns: metric,value,measured_at — e.g. exported results from another system."""
-        need(actor, "ASTRONAUT", *MEDICAL_ROLES)
+        crew_writes(actor)
         accepted, rejected = [], []
         for i, row in enumerate(csv.DictReader(io.StringIO(body.csv.strip())), start=2):
             try:
@@ -660,7 +729,13 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
                 accepted.append(m["id"])
             except (HTTPException, KeyError, ValueError, AttributeError) as e:
                 rejected.append({"line": i, "error": getattr(e, "detail", str(e))})
-        return {"accepted": accepted, "rejected": rejected}
+        # Imported values go through the same baseline check as any other measurement (oldest first).
+        stored = db.rows(conn, f"SELECT * FROM measurements WHERE id IN ({','.join('?' * len(accepted))}) ORDER BY measured_at",
+                         *accepted) if accepted else []
+        deviations = sum(intelligence.assess(conn, m).get("status") == "DEVIATION" for m in stored)
+        if deviations:
+            await hub.send({"type": "alerts"}, actor.crew_member_id)
+        return {"accepted": accepted, "rejected": rejected, "deviations": deviations}
 
     @app.get("/measurements")
     async def list_measurements(crew_member_id: str | None = None, metric: str | None = None, include_superseded: bool = False,
@@ -684,7 +759,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
 
     @app.post("/sessions")
     async def start_session(body: SessionIn, actor: Actor = Depends(current)):
-        need(actor, "ASTRONAUT", "CREW_MEDICAL_OFFICER")
+        crew_writes(actor)
         if body.task_id:
             t = task_or_404(body.task_id)
             if t["crew_member_id"] != actor.crew_member_id:
@@ -719,7 +794,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         crew = crew_member_id or actor.crew_member_id
         medical_access(actor, crew)
         out = db.rows(conn, "SELECT s.*, t.title task_title, t.task_type task_type FROM sensor_sessions s "
-                           "LEFT JOIN tasks t ON t.id = s.task_id WHERE s.crew_member_id = ? "
+                           "LEFT JOIN tasks t ON t.id = s.task_id WHERE s.crew_member_id = ? AND s.kind = 'EXERCISE' "
                            "ORDER BY s.started_at DESC LIMIT 50", crew)
         for s in out:
             s["summary"] = json.loads(s.pop("summary_json") or "null")
@@ -727,6 +802,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
 
     @app.post("/sessions/{session_id}/rpe")
     async def session_rpe(session_id: str, body: RpeIn, actor: Actor = Depends(current)):
+        crew_writes(actor)
         s = db.one(conn, "SELECT * FROM sensor_sessions WHERE id = ?", session_id)
         if not s or s["crew_member_id"] != actor.crew_member_id:
             raise HTTPException(404, "Session not found")
@@ -742,7 +818,7 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         tasks = db.rows(conn, "SELECT status, COUNT(*) n FROM tasks WHERE crew_member_id = ? AND task_type = 'EXERCISE' "
                               "AND due_at <= ? GROUP BY status", crew, iso(db.now()))
         sessions = db.rows(conn, "SELECT summary_json, ended_at FROM sensor_sessions WHERE crew_member_id = ? "
-                                 "AND status = 'COMPLETED' ORDER BY ended_at", crew)
+                                 "AND kind = 'EXERCISE' AND status = 'COMPLETED' ORDER BY ended_at", crew)
         sums = [(json.loads(s["summary_json"]), s["ended_at"]) for s in sessions]
         return {"compliance": tasks, "sessions": len(sums),
                 "hr_mean_history": [{"value": s["hr_mean"], "measured_at": at} for s, at in sums if s.get("hr_mean") is not None],
@@ -792,6 +868,20 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             db.update(conn, "alerts", alert_id, {"status": "RESOLVED", "resolved_by": actor.id,
                                                  "resolved_at": iso(db.now()), "resolution_note": note})
             db.record(conn, actor, "ALERT_RESOLVED", "alert", alert_id, {"note": note})
+
+    @app.post("/alerts/{alert_id}/follow-up")
+    async def add_to_cmo_review(alert_id: str, body: FollowUpIn, actor: Actor = Depends(current)):
+        """A clinician sends a medical alert to the crew member's (single) CMO review."""
+        need(actor, *MEDICAL_ROLES)
+        a = _alert_or_404(actor, alert_id)
+        if a["category"] != "MEDICAL" or a["status"] == "RESOLVED":
+            raise HTTPException(409, "Only open medical alerts can be sent to a CMO review")
+        if a["follow_up_task_id"] and task_or_404(a["follow_up_task_id"])["status"] in ("PENDING", "OVERDUE"):
+            raise HTTPException(409, "This alert is already in an open CMO review")
+        finding = body.note or a["explanation"].get("summary") or a["title"]
+        tid = protocols.request_cmo_review(conn, actor, a["crew_member_id"], alert_id, finding, body.priority)
+        await hub.send({"type": "tasks"}, a["crew_member_id"])
+        return protocols.with_evidence(conn, task_or_404(tid))
 
     @app.post("/alerts/{alert_id}/resolve")
     async def resolve_alert(alert_id: str, body: ResolveIn, actor: Actor = Depends(current)):
@@ -909,9 +999,10 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
             crew = body.crew_member_id or actor.crew_member_id
             if not crew:
                 raise HTTPException(400, "crew_member_id required for a personal reading")
+            crew_writes(actor)
             medical_access(actor, crew)
         else:
-            need(actor, "ASTRONAUT", "MISSION_OPERATOR", *MEDICAL_ROLES)  # environmental data, not health data
+            need(actor, "ASTRONAUT", "MISSION_OPERATOR")  # environmental data, not health data
             crew = None
         try:
             r = devices.store_reading(conn, actor, body.scope, crew, body.device_id, body.dose_rate_uGy_h,
@@ -921,6 +1012,48 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         completion = clinical.match_radiation_task(conn, actor, r)
         await hub.send({"type": "radiation"}, crew, medical=body.scope == "PERSONAL")
         return {**r, "completion": completion}
+
+    # -------------------------------------------------------------- integrations
+
+    def _device_keys() -> dict[str, str]:
+        """ASTRA_DEVICE_KEYS="bio-monitor-sim:<secret>,..." — one shared secret per device."""
+        return dict(p.strip().split(":", 1) for p in os.environ.get("ASTRA_DEVICE_KEYS", "").split(",") if ":" in p)
+
+    @app.post("/webhooks/measurements")
+    async def device_webhook(body: DeviceReadingIn, x_astra_device: str = Header(default=""),
+                             authorization: str | None = Header(default=None)):
+        """Inbound webhook for wearables / device gateways. Same pipeline as any measurement:
+        stored as STREAM, checked against the personal baseline, alert and notification if it deviates."""
+        expected = _device_keys().get(x_astra_device)
+        token = authorization.removeprefix("Bearer ") if authorization else ""
+        if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+            raise HTTPException(401, "Unknown device or bad key")
+        dev = db.one(conn, "SELECT * FROM devices WHERE id = ?", x_astra_device)
+        if not dev:
+            raise HTTPException(404, "Device not registered")
+        _crew_or_404(body.crew_member_id)
+        at = body.measured_at or db.now()
+        if at > db.now() + timedelta(minutes=5):
+            raise HTTPException(422, "measured_at is in the future")
+        actor = Actor(f"device:{x_astra_device}", "DEVICE", body.crew_member_id, dev["name"])
+        m = _store_measurement(actor, body.crew_member_id, body.metric, body.value, at, "STREAM", None, device_id=x_astra_device)
+        db.update(conn, "devices", x_astra_device, {"last_seen": iso(db.now())})
+        out = await _after_measurement(actor, m, None)
+        a = out["assessment"]
+        return {"measurement_id": m["id"], "status": a.get("status"), "z": a.get("z"), "alert_id": a.get("alert_id")}
+
+    @app.get("/notifications")
+    async def notifications(actor: Actor = Depends(current)):
+        need(actor, "MISSION_OPERATOR", *MEDICAL_ROLES)
+        return notify.status(conn)
+
+    @app.post("/notifications/test")
+    async def notifications_test(actor: Actor = Depends(current)):
+        """Raises an operational test alert so the whole chain (console + webhooks) can be checked."""
+        need(actor, "MISSION_OPERATOR", *MEDICAL_ROLES)
+        aid = protocols.raise_alert(conn, None, "OPERATIONAL", "NOTIFICATION_TEST", "MEDIUM", "Notification test",
+                                    {"summary": f"Test sent by {actor.name}.", "requested_by": actor.id})
+        return {"alert_id": aid}
 
     @app.get("/sync")
     async def sync_status(actor: Actor = Depends(current)):
@@ -1041,6 +1174,10 @@ def create_app(db_path: str = "astra.db", ground_path: str = "ground.db", backgr
         return e
 
     # -------------------------------------------------------------- websocket
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True}
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket, token: str = ""):

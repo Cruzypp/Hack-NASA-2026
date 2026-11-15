@@ -86,3 +86,13 @@ médicas.**
 | Hallazgos de revisión | alerta MEDICAL + tarea de revisión CMO; nunca modifica el protocolo | `clinical.review` |
 | Huecos de datos | ≥ 2 días sin datos en la ventana → alerta OPERATIONAL `DATA_GAP` | `clinical.review` |
 | Bitácora | inmutable (adendas), privada por defecto; el astronauta ve solo entradas compartidas; cambios de plan y revisiones se anotan solos | `clinical.log`, `clinical_log` |
+
+## Notificaciones e integraciones (añadido)
+
+| Decisión | Valor | Dónde |
+|---|---|---|
+| Severidad de la desviación | ≥ 3 SD robustas = REVIEW; ≥ 5 = HIGH (regla `baseline-robust-z` 1.1.0, experimental) | `intelligence.RULE` |
+| Notificación | dentro de la app: cada alerta una vez (`alerts.notified_at`) por WebSocket < 1 s; webhooks de salida opcionales con reintentos | `notify.py` |
+| Privacidad de webhooks | por defecto sin valores clínicos; `ASTRA_WEBHOOK_DETAILS=1` para incluirlos | `notify.render` |
+| Entrada de dispositivos | `POST /webhooks/measurements`, llave por dispositivo (`ASTRA_DEVICE_KEYS`), misma evaluación que cualquier medición | `main.device_webhook` |
+| Importación CSV | los valores importados pasan por la misma evaluación de línea base | `main.import_csv` |

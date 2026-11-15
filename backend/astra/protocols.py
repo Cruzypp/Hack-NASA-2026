@@ -131,6 +131,81 @@ def order_task(conn, actor: Actor, crew_member_id: str, title: str, task_type: s
     return task["id"]
 
 
+PRIORITY_RANK = {"ROUTINE": 0, "HIGH": 1, "CRITICAL": 2}
+REVIEW_SLOT = "10:00"  # default daily CMO review time (UTC); settings key `cmo_review_time` overrides it
+REVIEW_ROLES = ["CREW_MEDICAL_OFFICER", "FLIGHT_SURGEON"]
+
+
+CREW_DAY = ("08:00", "20:00")  # default crew working window (UTC); settings `crew_day_start` / `crew_day_end` override it
+
+
+def _crew_day(conn) -> tuple[time, time]:
+    return (time.fromisoformat(db.get_setting(conn, "crew_day_start", CREW_DAY[0])),
+            time.fromisoformat(db.get_setting(conn, "crew_day_end", CREW_DAY[1])))
+
+
+def _into_crew_day(conn, dt: datetime) -> datetime:
+    """Move a time that falls outside the crew working window to the start of the next window."""
+    start, end = _crew_day(conn)
+    if dt.time() < start:
+        return datetime.combine(dt.date(), start, tzinfo=dt.tzinfo)
+    if dt.time() > end:
+        return datetime.combine(dt.date() + timedelta(days=1), start, tzinfo=dt.tzinfo)
+    return dt
+
+
+def _review_due(conn, at: datetime, priority: str) -> datetime:
+    """Findings are reviewed at the daily review slot (at least 2 h ahead); CRITICAL ones at the next
+    full hour after that. Either way the review lands inside the crew working window, never in sleep hours."""
+    if priority == "CRITICAL":
+        return _into_crew_day(conn, at.replace(minute=0, second=0, microsecond=0) + timedelta(hours=2))
+    slot = time.fromisoformat(db.get_setting(conn, "cmo_review_time", REVIEW_SLOT))
+    due = datetime.combine(at.date(), slot, tzinfo=at.tzinfo)
+    while due < at + timedelta(hours=2):
+        due += timedelta(days=1)
+    return _into_crew_day(conn, due)
+
+
+def open_cmo_review(conn, crew_member_id: str) -> dict | None:
+    return db.one(conn, """SELECT * FROM tasks WHERE crew_member_id = ? AND status IN ('PENDING','OVERDUE')
+                           AND schedule_type = 'CLINICIAN_ORDERED' AND completion_criteria LIKE '%"consolidated": true%'
+                           ORDER BY due_at LIMIT 1""", crew_member_id)
+
+
+def request_cmo_review(conn, actor: Actor, crew_member_id: str, alert_id: str, finding: str, priority: str = "HIGH",
+                       at: datetime | None = None) -> str:
+    """Attach a finding to the crew member's single open CMO review, creating it if needed.
+
+    Every detector (measurement deviation, periodic review, body composition, cognitive load …) routes
+    through here, so several indicators produce one review that lists all of them, scheduled at the
+    review slot instead of at detection time + an arbitrary offset."""
+    at = at or db.now()
+    alert = db.one(conn, "SELECT title FROM alerts WHERE id = ?", alert_id)
+    line = f"• {alert['title']}: {finding}"
+    with db.tx(conn):
+        task = open_cmo_review(conn, crew_member_id)
+        if task:
+            linked = db.rows(conn, "SELECT title FROM alerts WHERE follow_up_task_id = ?", task["id"])
+            titles = [a["title"] for a in linked] + [alert["title"]]
+            prio = max(task["priority"], priority, key=PRIORITY_RANK.get)
+            due = min(parse(task["due_at"]), _review_due(conn, at, prio))
+            db.update(conn, "tasks", task["id"], {"title": _review_title(titles), "priority": prio, "due_at": iso(due),
+                                                  "note": (task["note"] + "\n" + line) if task["note"] else line})
+            db.record(conn, actor, "CMO_REVIEW_FINDING_ADDED", "task", task["id"], {"alert_id": alert_id, "finding": finding})
+            task_id = task["id"]
+        else:
+            task_id = order_task(conn, actor, crew_member_id, _review_title([alert["title"]]), "VERIFICATION",
+                                 _review_due(conn, at, priority), priority,
+                                 {"kind": "VERIFICATION", "roles": REVIEW_ROLES, "consolidated": True},
+                                 source_alert_id=alert_id, note=line)
+        db.update(conn, "alerts", alert_id, {"follow_up_task_id": task_id})
+    return task_id
+
+
+def _review_title(titles: list[str]) -> str:
+    return f"CMO review · {len(titles)} findings" if len(titles) > 1 else f"CMO review: {titles[0]}"
+
+
 def reschedule(conn, actor: Actor, task_id: str, due: datetime, reason: str) -> None:
     with db.tx(conn):
         t = db.one(conn, "SELECT * FROM tasks WHERE id = ?", task_id)
